@@ -1,115 +1,83 @@
 {
-  "updated_at": "2026-11-26 16:39",
+  "updated_at": "2026-11-26 16:58",
   "source_url": "https://nitsc.co.jp/cafeteria/",
   "cafeterias": [
     {
       "id": "cafeteria1",
       "name": "ダイニングホール",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria1",
-      "links": [],
-      "images": [
-        {
-          "alt": "ダイニングホール 今週の献立表",
-          "url": "https://nitsc.co.jp/userdata/1menu.png"
-        }
-      ],
+      "image_url": "https://nitsc.co.jp/userdata/1menu.png",
       "menu_parsed": {
         "today_label": "木",
-        "today_items": [
-          "加以重",
-          "幼千",
-          "琉球木一",
-          "温宝",
+        "sections": [
+          {
+            "category": "抽出メニュー（簡易OCR）",
+            "items": [
+              "カツ重",
+              "琉球ポーク",
+              "温玉",
+              "廿亏夕",
+              "黑胡椒加弓",
+              "温玉",
+              "人定食",
+              "三二小么",
+              "蛋白[g]",
+              "垣分"
+            ]
+          }
+        ],
+        "fallback_items": [
+          "カツ重",
+          "琉球ポーク",
+          "温玉",
           "廿亏夕",
-          "乳小麦",
-          "用乳小",
-          "1,215",
-          "力口[kcal]",
-          "38.9",
-          "蛋白質[g]",
-          "36.6",
-          "[g]",
-          "8.6",
-          "分",
-          "[g]",
-          "-7",
           "黑胡椒加弓",
-          "温宝",
-          "乳小麦",
-          "图乳小",
-          "1.019",
-          "力口一[kcal]",
-          "35.3",
-          "蛋白質[g]",
-          "34.2",
-          "[g]",
-          "5.4",
-          "分",
-          "[g]",
+          "温玉",
           "人定食",
           "三二小么",
-          "乳小麦",
-          "乳小",
-          "645",
-          "力口[kcal]",
-          "16.6",
           "蛋白[g]",
-          "31.5",
-          "[g]",
-          "3.5",
-          "垣分",
-          "[g]"
+          "垣分"
         ],
-        "method": "local_ocr"
+        "method": "local_ocr_only"
       }
     },
     {
       "id": "cafeteria2",
       "name": "キッチン＆カフェトレビ",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria2",
-      "links": [],
-      "images": [
-        {
-          "alt": "キッチン＆カフェトレビ 今週の献立表",
-          "url": "https://nitsc.co.jp/userdata/2menu.png"
-        }
-      ],
+      "image_url": "https://nitsc.co.jp/userdata/2menu.png",
       "menu_parsed": {
         "today_label": "木",
-        "today_items": [
+        "sections": [
+          {
+            "category": "抽出メニュー（簡易OCR）",
+            "items": [
+              "揚件",
+              "盒/一7",
+              "y",
+              "7仆补",
+              "&人夕",
+              "小井",
+              "休止",
+              "贩壳",
+              "贩壳",
+              "调替夏季"
+            ]
+          }
+        ],
+        "fallback_items": [
           "揚件",
           "盒/一7",
           "y",
           "7仆补",
           "&人夕",
-          "乳小麦",
-          "湘乳小",
-          "942",
-          "力口-[kcal]",
-          "34.1",
-          "蛋白質[g]",
-          "35.6",
-          "[g]",
-          "4.9",
-          "分",
-          "[g]",
           "小井",
           "休止",
           "贩壳",
           "贩壳",
-          "乳小麦",
-          "1.036",
-          "力口一[kcal]",
-          "33.1",
-          "蛋白質[g]",
-          "32.0",
-          "[g]",
-          "6.8",
-          "分",
-          "[g]",
           "调替夏季"
         ],
-        "method": "local_ocr"
+        "method": "local_ocr_only"
       }
     }
   ]
