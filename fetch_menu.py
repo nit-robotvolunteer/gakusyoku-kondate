@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -41,15 +42,19 @@ DAY_X_RATIOS = {
 }
 Y_RATIO = (0.15, 0.96)
 
-# ローカルOCRのよくある誤読補正辞書
+# ローカルOCRのよくある誤読補正辞書（創英角ポップ体対策）
 REPLACE_MAP = {
     "加以重": "カツ重",
     "黒胡椒加弓": "黒胡椒からあげ",
     "温宝": "温玉",
     "琉球木一": "琉球ポーク",
+    "甘亏夕": "サラダ",
+    "三二小么": "ミニオムレツ",
+    "人定食": "おでん定食",
     "力口[kcal]": "",
     "力ロー[kcal]": "",
     "蛋白質[g]": "",
+    "蛋白[g]": "",
     "脂質[g]": "",
     "塩分[g]": "",
 }
@@ -60,6 +65,7 @@ NOISE_EXACT = {
     "蛋白質",
     "脂質",
     "塩分",
+    "垣分",
     "kcal",
     "g",
     "分",
@@ -80,6 +86,23 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     )
 }
+
+
+def load_previous_cache(path: str = "menu.json") -> dict:
+    """前回のmenu.jsonから食堂IDごとのキャッシュを読み込む"""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        cache = {}
+        for caf in data.get("cafeterias", []):
+            cid = caf.get("id")
+            if cid:
+                cache[cid] = caf
+        return cache
+    except Exception:
+        return {}
 
 
 def prepare_day_crop_bytes(img_bytes: bytes, day_key: str) -> bytes:
@@ -123,10 +146,12 @@ def clean_ocr_lines(raw_lines: list[str]) -> list[str]:
         if not s or s in NOISE_EXACT:
             continue
 
-        if any(k in s for k in ["kcal", "蛋白質", "脂質", "塩分", "アレルゲン", "乳小"]):
+        if any(k in s for k in ["kcal", "蛋白質", "蛋白[", "脂質", "塩分", "アレルゲン", "乳小"]):
             continue
 
         if re.fullmatch(r"[\[\]().\-+0-9,.\s]+g?", s):
+            continue
+        if len(s) == 1 and re.fullmatch(r"[A-Za-z0-9\-/]", s):
             continue
         if s in {"[", "]", "(", ")", "[g]", "g]"}:
             continue
@@ -156,6 +181,28 @@ def run_local_ocr(ocr_engine: RapidOCR, caf_name: str, crop_png_bytes: bytes, to
         return []
 
 
+def get_available_models(client: genai.Client) -> list[str]:
+    """利用可能なGeminiモデルから画像入力に向いたFlash/Pro系を優先順で取得する"""
+    preferred = [
+        "gemini-3.8-flash",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
+    ]
+    try:
+        available = {
+            m.name.replace("models/", "")
+            for m in client.models.list()
+            if "generateContent" in (getattr(m, "supported_actions", None) or [])
+        }
+        picked = [m for m in preferred if m in available]
+        if picked:
+            return picked
+    except Exception:
+        pass
+    return ["gemini-3.8-flash"]
+
+
 def format_menu_with_gemini(
     caf: dict,
     crop_png_bytes: bytes,
@@ -181,9 +228,9 @@ def format_menu_with_gemini(
 対象食堂: {caf_name}（{today_key}曜日）
 {cat_hint}
 
-添付画像は献立表から{today_key}曜日の列を切り抜いたものです。
-参考としてローカルOCRの抽出結果も載せますが、誤字や改行の分断が含まれています。
-画像を見て正しい日本語の料理名に補正し、見やすいグループ形式でJSON出力してください。
+添付画像は献立表（創英角ポップ体）から{today_key}曜日の列を切り抜いたものです。
+参考としてローカルOCRの抽出結果も載せますが、POP体特有の誤字や改行の分断が含まれています。
+画像そのものを見て正しい日本語の料理名に補正し、見やすいグループ形式でJSON出力してください。
 
 ルール:
 - カロリー・蛋白質・脂質・塩分・アレルゲン表記（卵・乳・小麦など）は除外する
@@ -209,11 +256,11 @@ def format_menu_with_gemini(
         prompt,
     ]
 
-    models_to_try = ["gemini-3.8-flash", "gemini-3.8-flash-lite"]
+    models_to_try = get_available_models(client)
     last_exc = None
 
     for model_name in models_to_try:
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -247,8 +294,8 @@ def format_menu_with_gemini(
                 last_exc = exc
                 msg = str(exc)
                 is_transient = ("503" in msg) or ("UNAVAILABLE" in msg) or ("429" in msg)
-                if is_transient and attempt < 2:
-                    wait_sec = 2 * (2 ** attempt)
+                if is_transient and attempt < 3:
+                    wait_sec = 5 * (2 ** attempt)
                     print(f"[INFO] {caf_name} ({model_name}) 一時エラーのため {wait_sec}s 待機して再試行...")
                     time.sleep(wait_sec)
                     continue
@@ -262,40 +309,58 @@ def fetch_all_cafeterias(today_key: str) -> list[dict]:
     """各食堂の献立画像を取得し、ローカルOCR＋Gemini整形で構造化データを生成する"""
     results: list[dict] = []
     ocr_engine = RapidOCR()
+    prev_cache = load_previous_cache()
 
     for base in CAFETERIAS:
+        cid = base["id"]
         img_url = base["image_url"]
         sections: list[dict] = []
         fallback_items: list[str] = []
         source_method = "none"
+        img_hash = ""
 
         try:
             r = requests.get(img_url, headers=HEADERS, timeout=25)
             r.raise_for_status()
             img_bytes = r.content
+            img_hash = hashlib.sha256(img_bytes).hexdigest()
 
-            crop_bytes = prepare_day_crop_bytes(img_bytes, today_key)
-            ocr_lines = run_local_ocr(ocr_engine, base["name"], crop_bytes, today_key)
-
-            # 1. Geminiで切り抜き画像＋OCRテキストを自然なメニュー表に整形（503時はリトライ）
-            formatted_sections = format_menu_with_gemini(base, crop_bytes, ocr_lines, today_key)
-            if formatted_sections:
-                sections = formatted_sections
+            # 同一画像・同一曜日で既にGemini整形済みならキャッシュを再利用
+            cached = prev_cache.get(cid) or {}
+            cached_parsed = cached.get("menu_parsed") or {}
+            if (
+                cached.get("image_hash") == img_hash
+                and cached_parsed.get("today_label") == today_key
+                and cached_parsed.get("method") == "ocr_plus_gemini"
+                and cached_parsed.get("sections")
+            ):
+                print(f"[INFO] キャッシュ再利用 {base['name']} ({today_key}曜)")
+                sections = cached_parsed["sections"]
                 source_method = "ocr_plus_gemini"
-            elif ocr_lines:
-                # 2. Geminiが503等で落ちた場合のフォールバック（ローカルOCRのノイズ除去済み行）
-                fallback_items = ocr_lines
-                sections = [{"category": "抽出メニュー（簡易OCR）", "items": ocr_lines}]
-                source_method = "local_ocr_only"
+            else:
+                crop_bytes = prepare_day_crop_bytes(img_bytes, today_key)
+                ocr_lines = run_local_ocr(ocr_engine, base["name"], crop_bytes, today_key)
+
+                # 1. Geminiで切り抜き画像＋OCRテキストを自然なメニュー表に整形
+                formatted_sections = format_menu_with_gemini(base, crop_bytes, ocr_lines, today_key)
+                if formatted_sections:
+                    sections = formatted_sections
+                    source_method = "ocr_plus_gemini"
+                elif ocr_lines:
+                    # 2. Geminiが503等で落ちた場合のフォールバック
+                    fallback_items = ocr_lines
+                    sections = [{"category": "抽出メニュー（簡易OCR）", "items": ocr_lines}]
+                    source_method = "local_ocr_only"
 
         except Exception as exc:
             print(f"[WARN] 画像取得失敗 ({base['name']} / {img_url}): {exc}")
 
         results.append({
-            "id": base["id"],
+            "id": cid,
             "name": base["name"],
             "source_url": base["source_url"],
             "image_url": img_url,
+            "image_hash": img_hash,
             "menu_parsed": {
                 "today_label": today_key,
                 "sections": sections,
@@ -325,7 +390,6 @@ def build_discord_embed(caf: dict, updated_at: str, today_str: str) -> dict:
         embed["description"] = "本日の献立を抽出できませんでした（休止日または画像未更新の可能性があります）。"
         return embed
 
-    # 区分ごとにDiscord EmbedのFieldで見やすく表示
     for sec in sections:
         cat = sec.get("category", "メニュー")
         items = sec.get("items", [])
