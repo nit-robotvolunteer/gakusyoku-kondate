@@ -1,0 +1,30 @@
+{
+  "updated_at": "2026-11-26 11:52",
+  "source_url": "https://nitsc.co.jp/cafeteria/",
+  "cafeterias": [
+    {
+      "id": "cafeteria1",
+      "name": "ダイニングホール",
+      "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria1",
+      "links": [],
+      "images": [],
+      "menu_parsed": {
+        "today_label": "木",
+        "today_items": [],
+        "weekly": {}
+      }
+    },
+    {
+      "id": "cafeteria2",
+      "name": "キッチン＆カフェトレビ",
+      "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria2",
+      "links": [],
+      "images": [],
+      "menu_parsed": {
+        "today_label": "木",
+        "today_items": [],
+        "weekly": {}
+      }
+    }
+  ]
+}
