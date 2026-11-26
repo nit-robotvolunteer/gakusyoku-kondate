@@ -56,7 +56,8 @@ CAFETERIAS = [
     },
 ]
 
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+# 改行・カンマ・空白区切りで複数指定できる（テスト用と本番用の両方に送る等）
+DISCORD_WEBHOOK_URLS = [u for u in re.split(r"[\s,]+", os.environ.get("DISCORD_WEBHOOK_URL") or "") if u]
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # 公開ページ（GitHub Pages 等）のURL。設定すると通知にリンクが付く
 SITE_URL = os.environ.get("SITE_URL", "").strip()
@@ -613,11 +614,7 @@ def process_cafeteria(caf: dict, today: date, prev: dict, ocr_holder: dict, loca
 # ---------------------------------------------------------------------------
 # Discord
 # ---------------------------------------------------------------------------
-CATEGORY_EMOJI = [("スペシャル", "⭐"), ("日替", "🍱"), ("日工大", "🎓"), ("鉄板", "🔥"), ("パスタ", "🍝")]
-
-
-def category_emoji(cat: str) -> str:
-    return next((e for k, e in CATEGORY_EMOJI if k in cat), "🍽️")
+WARN_MARK = "\u26a0\ufe0e"  # ⚠︎（絵文字ではなく文字として表示させる）
 
 
 def format_section_value(sec: dict) -> str:
@@ -629,12 +626,12 @@ def format_section_value(sec: dict) -> str:
     if sides:
         lines.append("＋ " + " ・ ".join(sides))
     for n in sec["notes"]:
-        lines.append(f"📝 {n}")
+        lines.append(f"・{n}")
     meta = []
     if sec["kcal"]:
         meta.append(f"`{sec['kcal']:,} kcal`")
     if sec["allergens"]:
-        meta.append("⚠️ " + "・".join(sec["allergens"]))
+        meta.append(f"{WARN_MARK} " + "・".join(sec["allergens"]))
     if meta:
         lines.append(" ".join(meta))
     return "\n".join(lines)[:1024]
@@ -662,7 +659,7 @@ def build_discord_payload(data: dict, today: date, crops: dict[str, bytes]) -> t
         }
         desc = [f"**{date_label}** のメニュー"]
         if caf.get("stale"):
-            desc.append("⚠️ 献立表が今週分に更新されていない可能性があります")
+            desc.append(f"{WARN_MARK} 献立表が今週分に更新されていない可能性があります")
         embed["description"] = "\n".join(desc)
 
         serving = [s for s in secs if s["items"]]
@@ -675,7 +672,7 @@ def build_discord_payload(data: dict, today: date, crops: dict[str, bytes]) -> t
             if sec in has_note_only:
                 continue
             embed["fields"].append({
-                "name": f"{category_emoji(sec['category'])} {sec['category']}"[:256],
+                "name": f"【{sec['category']}】"[:256],
                 "value": format_section_value(sec),
                 "inline": False,
             })
@@ -689,32 +686,42 @@ def build_discord_payload(data: dict, today: date, crops: dict[str, bytes]) -> t
             fname = f"today_{caf['id']}.png"
             embed["image"] = {"url": f"attachment://{fname}"}
             files.append((fname, crop))
-        footer = "献立表をAIで読み取り" if method == "gemini" else "⚠️ 簡易OCRのため誤字の可能性あり（下の画像が原本）"
-        embed["footer"] = {"text": f"{footer} ・ タイトルから献立表を開けます"}
+        if method == "gemini":
+            footer = "タイトルから献立表を開けます。献立表を自動で読み取っています。"
+        else:
+            footer = "タイトルから献立表を開けます。簡易読み取りのため誤字があるかもしれません（下の画像が原本です）。"
+        embed["footer"] = {"text": footer}
         embeds.append(embed)
 
     payload: dict = {"embeds": embeds[:10]}
     if SITE_URL:
-        payload["content"] = f"🗓️ 今週の献立はこちら → <{SITE_URL}>"
+        payload["content"] = f"今週の献立: <{SITE_URL}>"
     return payload, files
 
 
 def send_discord(payload: dict, files: list[tuple[str, bytes]]) -> None:
-    if not DISCORD_WEBHOOK_URL:
+    if not DISCORD_WEBHOOK_URLS:
         print("[INFO] DISCORD_WEBHOOK_URL 未設定のため通知をスキップ")
         return
-    if files:
-        multipart = {f"files[{i}]": (name, blob, "image/png") for i, (name, blob) in enumerate(files)}
-        res = requests.post(
-            DISCORD_WEBHOOK_URL, data={"payload_json": json.dumps(payload, ensure_ascii=False)},
-            files=multipart, timeout=20,
-        )
-    else:
-        res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=20)
-    if res.status_code >= 400:
-        print(f"[WARN] Discord送信失敗 {res.status_code}: {res.text[:300]}")
-    res.raise_for_status()
-    print("[INFO] Discord 通知を送信しました")
+    failed = 0
+    for i, url in enumerate(DISCORD_WEBHOOK_URLS, 1):
+        try:
+            if files:
+                multipart = {f"files[{j}]": (name, blob, "image/png") for j, (name, blob) in enumerate(files)}
+                res = requests.post(
+                    url, data={"payload_json": json.dumps(payload, ensure_ascii=False)}, files=multipart, timeout=20
+                )
+            else:
+                res = requests.post(url, json=payload, timeout=20)
+            res.raise_for_status()
+            print(f"[INFO] Discord 通知を送信しました（{i}/{len(DISCORD_WEBHOOK_URLS)}）")
+        except Exception as exc:
+            failed += 1
+            # URLはログに出さない（Webhook URLを知られると誰でも投稿できるため）
+            body = getattr(getattr(exc, "response", None), "text", "")[:200]
+            print(f"[WARN] Discord 送信失敗（{i}/{len(DISCORD_WEBHOOK_URLS)}）: {type(exc).__name__} {body}")
+    if failed == len(DISCORD_WEBHOOK_URLS):
+        raise RuntimeError("すべての Discord Webhook への送信に失敗しました")
 
 
 # ---------------------------------------------------------------------------
