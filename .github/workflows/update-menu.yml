@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 pypdf google-genai
+          pip install requests google-genai pillow rapidocr_onnxruntime
 
       - name: Run fetch_menu.py
         env:
@@ -41,5 +41,6 @@ jobs:
             echo "No changes to commit."
           else
             git commit -m "chore: update cafeteria menu.json"
+            git pull --rebase origin main
             git push
           fi
