@@ -181,35 +181,13 @@ def run_local_ocr(ocr_engine: RapidOCR, caf_name: str, crop_png_bytes: bytes, to
         return []
 
 
-def get_available_models(client: genai.Client) -> list[str]:
-    """利用可能なGeminiモデルから画像入力に向いたFlash/Pro系を優先順で取得する"""
-    preferred = [
-        "gemini-3.8-flash",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.0-flash",
-    ]
-    try:
-        available = {
-            m.name.replace("models/", "")
-            for m in client.models.list()
-            if "generateContent" in (getattr(m, "supported_actions", None) or [])
-        }
-        picked = [m for m in preferred if m in available]
-        if picked:
-            return picked
-    except Exception:
-        pass
-    return ["gemini-3.8-flash"]
-
-
 def format_menu_with_gemini(
     caf: dict,
     crop_png_bytes: bytes,
     ocr_lines: list[str],
     today_key: str,
 ) -> list[dict]:
-    """切り抜き画像＋OCR下書きテキストをGeminiに渡し、誤字補正と区分ごとの構造化を行う"""
+    """切り抜き画像＋OCR下書きテキストをGeminiに渡し、誤字補正と区分ごとの構造化を行う（短時間打ち切り）"""
     if not GEMINI_API_KEY:
         return []
 
@@ -220,7 +198,7 @@ def format_menu_with_gemini(
         if categories
         else "区分見出しがあれば区分ごとに、無ければ「本日のメニュー」という1グループにまとめてください。"
     )
-    ocr_hint = "\n".join(f"- {x}" for x in ocr_lines) if ocr_lines else "(なし)"
+    ocr_hint = "\n".join(f"- {x}" for x in ocr_lines[:20]) if ocr_lines else "(なし)"
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = f"""
@@ -256,11 +234,11 @@ def format_menu_with_gemini(
         prompt,
     ]
 
-    models_to_try = get_available_models(client)
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
     last_exc = None
 
     for model_name in models_to_try:
-        for attempt in range(4):
+        for attempt in range(2):
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -294,10 +272,8 @@ def format_menu_with_gemini(
                 last_exc = exc
                 msg = str(exc)
                 is_transient = ("503" in msg) or ("UNAVAILABLE" in msg) or ("429" in msg)
-                if is_transient and attempt < 3:
-                    wait_sec = 5 * (2 ** attempt)
-                    print(f"[INFO] {caf_name} ({model_name}) 一時エラーのため {wait_sec}s 待機して再試行...")
-                    time.sleep(wait_sec)
+                if is_transient and attempt < 1:
+                    time.sleep(1.5)
                     continue
                 break
 
@@ -320,12 +296,11 @@ def fetch_all_cafeterias(today_key: str) -> list[dict]:
         img_hash = ""
 
         try:
-            r = requests.get(img_url, headers=HEADERS, timeout=25)
+            r = requests.get(img_url, headers=HEADERS, timeout=15)
             r.raise_for_status()
             img_bytes = r.content
             img_hash = hashlib.sha256(img_bytes).hexdigest()
 
-            # 同一画像・同一曜日で既にGemini整形済みならキャッシュを再利用
             cached = prev_cache.get(cid) or {}
             cached_parsed = cached.get("menu_parsed") or {}
             if (
@@ -341,13 +316,11 @@ def fetch_all_cafeterias(today_key: str) -> list[dict]:
                 crop_bytes = prepare_day_crop_bytes(img_bytes, today_key)
                 ocr_lines = run_local_ocr(ocr_engine, base["name"], crop_bytes, today_key)
 
-                # 1. Geminiで切り抜き画像＋OCRテキストを自然なメニュー表に整形
                 formatted_sections = format_menu_with_gemini(base, crop_bytes, ocr_lines, today_key)
                 if formatted_sections:
                     sections = formatted_sections
                     source_method = "ocr_plus_gemini"
                 elif ocr_lines:
-                    # 2. Geminiが503等で落ちた場合のフォールバック
                     fallback_items = ocr_lines
                     sections = [{"category": "抽出メニュー（簡易OCR）", "items": ocr_lines}]
                     source_method = "local_ocr_only"
