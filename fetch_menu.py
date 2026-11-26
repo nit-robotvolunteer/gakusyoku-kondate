@@ -1,9 +1,11 @@
 import io
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 import requests
 from google import genai
 from google.genai import types
@@ -17,15 +19,18 @@ CAFETERIAS = [
         "name": "ダイニングホール",
         "source_url": f"{PAGE_URL}#cafeteria1",
         "image_url": "https://nitsc.co.jp/userdata/1menu.png",
+        "categories": ["スペシャルランチ", "日替わりランチ", "日工大ランチ"],
     },
     {
         "id": "cafeteria2",
         "name": "キッチン＆カフェトレビ",
         "source_url": f"{PAGE_URL}#cafeteria2",
         "image_url": "https://nitsc.co.jp/userdata/2menu.png",
+        "categories": [],
     },
 ]
 
+# 曜日ごとの横方向クロップ比率（x_start, x_end）
 DAY_X_RATIOS = {
     "月": (0.14, 0.30),
     "火": (0.29, 0.45),
@@ -36,8 +41,33 @@ DAY_X_RATIOS = {
 }
 Y_RATIO = (0.15, 0.96)
 
-# ノイズになりやすい栄養表記などの除外ワード（必要に応じて調整）
-NOISE_EXACT = {"アレルゲン", "カロリー", "蛋白質", "脂質", "塩分", "kcal", "g"}
+# ローカルOCRのよくある誤読補正辞書
+REPLACE_MAP = {
+    "加以重": "カツ重",
+    "黒胡椒加弓": "黒胡椒からあげ",
+    "温宝": "温玉",
+    "琉球木一": "琉球ポーク",
+    "力口[kcal]": "",
+    "力ロー[kcal]": "",
+    "蛋白質[g]": "",
+    "脂質[g]": "",
+    "塩分[g]": "",
+}
+
+NOISE_EXACT = {
+    "アレルゲン",
+    "カロリー",
+    "蛋白質",
+    "脂質",
+    "塩分",
+    "kcal",
+    "g",
+    "分",
+    "幼千",
+    "乳小麦",
+    "用乳小",
+    "図乳小",
+}
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -67,7 +97,10 @@ def prepare_day_crop_bytes(img_bytes: bytes, day_key: str) -> bytes:
             min(h, int(h * y1_r)),
         )
         cropped = im.crop(box)
-        enlarged = cropped.resize((cropped.width * 2, cropped.height * 2), Image.Resampling.LANCZOS)
+        enlarged = cropped.resize(
+            (cropped.width * 2, cropped.height * 2),
+            Image.Resampling.LANCZOS,
+        )
         gray = ImageOps.grayscale(enlarged)
         enhanced = ImageOps.autocontrast(gray)
 
@@ -77,30 +110,44 @@ def prepare_day_crop_bytes(img_bytes: bytes, day_key: str) -> bytes:
 
 
 def clean_ocr_lines(raw_lines: list[str]) -> list[str]:
-    """OCRの行リストから明らかに栄養ラベルだけの行を軽く除外する"""
+    """OCRの行リストから数値・栄養表記・アレルゲン系ノイズを削り、よく出る誤字を補正する"""
     cleaned: list[str] = []
     for line in raw_lines:
         s = line.strip()
         if not s:
             continue
-        if s in NOISE_EXACT:
+
+        for bad, good in REPLACE_MAP.items():
+            s = s.replace(bad, good).strip()
+
+        if not s or s in NOISE_EXACT:
             continue
-        if s.endswith("カロリー") or s.endswith("蛋白質") or s.endswith("脂質") or s.endswith("塩分"):
+
+        if any(k in s for k in ["kcal", "蛋白質", "脂質", "塩分", "アレルゲン", "乳小"]):
             continue
+
+        if re.fullmatch(r"[\[\]().\-+0-9,.\s]+g?", s):
+            continue
+        if s in {"[", "]", "(", ")", "[g]", "g]"}:
+            continue
+
         cleaned.append(s)
     return cleaned
 
 
-def parse_menu_with_local_ocr(ocr_engine: RapidOCR, caf_name: str, crop_png_bytes: bytes, today_key: str) -> list[str]:
+def run_local_ocr(ocr_engine: RapidOCR, caf_name: str, crop_png_bytes: bytes, today_key: str) -> list[str]:
     """ローカルOCRで切り抜き画像から今日のメニュー行を抽出する"""
     try:
         with Image.open(io.BytesIO(crop_png_bytes)) as im:
-            import numpy as np
             arr = np.array(im)
         result, _ = ocr_engine(arr)
         if not result:
             return []
-        raw_lines = [str(item[1]).strip() for item in result if item and len(item) >= 2 and str(item[1]).strip()]
+        raw_lines = [
+            str(item[1]).strip()
+            for item in result
+            if item and len(item) >= 2 and str(item[1]).strip()
+        ]
         items = clean_ocr_lines(raw_lines)
         print(f"[INFO] ローカルOCR {caf_name} ({today_key}曜) 抽出件数: {len(items)}")
         return items
@@ -109,25 +156,56 @@ def parse_menu_with_local_ocr(ocr_engine: RapidOCR, caf_name: str, crop_png_byte
         return []
 
 
-def parse_menu_with_gemini(caf_name: str, file_bytes: bytes, mime_type: str, today_key: str) -> list[str]:
-    """保険用：Gemini APIで献立表画像から今日のメニューを抽出する"""
+def format_menu_with_gemini(
+    caf: dict,
+    crop_png_bytes: bytes,
+    ocr_lines: list[str],
+    today_key: str,
+) -> list[dict]:
+    """切り抜き画像＋OCR下書きテキストをGeminiに渡し、誤字補正と区分ごとの構造化を行う"""
     if not GEMINI_API_KEY:
         return []
 
+    caf_name = caf["name"]
+    categories = caf.get("categories") or []
+    cat_hint = (
+        f"想定されるメニュー区分（上から順）: {', '.join(categories)}"
+        if categories
+        else "区分見出しがあれば区分ごとに、無ければ「本日のメニュー」という1グループにまとめてください。"
+    )
+    ocr_hint = "\n".join(f"- {x}" for x in ocr_lines) if ocr_lines else "(なし)"
+
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = f"""
-あなたは学食の献立表を読み取るアシスタントです。
-対象食堂: {caf_name}
-添付された献立表から、"{today_key}"曜日のメニュー名を抽出してください。
-休売・休業などの記載がある場合はそれも簡潔に含めてください。
-余計な解説は省き、次のJSON形式のみで出力してください。
+あなたは大学の学食献立表を見やすく整理するアシスタントです。
+対象食堂: {caf_name}（{today_key}曜日）
+{cat_hint}
+
+添付画像は献立表から{today_key}曜日の列を切り抜いたものです。
+参考としてローカルOCRの抽出結果も載せますが、誤字や改行の分断が含まれています。
+画像を見て正しい日本語の料理名に補正し、見やすいグループ形式でJSON出力してください。
+
+ルール:
+- カロリー・蛋白質・脂質・塩分・アレルゲン表記（卵・乳・小麦など）は除外する
+- 1つの定食・セット内の主菜と副菜は「／」でつなぐか、わかりやすい単位にまとめる（例: 「桐生ソースカツ重／温玉／サラダ」）
+- 「休売」「休業」などの記載がある場合はそのまま簡潔に入れる
+- 余計な説明文は書かず、以下のJSON形式のみを出力する
 
 {{
-  "today_items": ["メニュー1", "メニュー2"]
+  "sections": [
+    {{
+      "category": "スペシャルランチ",
+      "items": ["桐生ソースカツ重／温玉／サラダ"]
+    }}
+  ]
 }}
+
+参考OCRテキスト:
+{ocr_hint}
 """
+
     parts = [
-        types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
+        types.Part.from_bytes(data=crop_png_bytes, mime_type="image/png"),
         prompt,
     ]
 
@@ -146,35 +224,49 @@ def parse_menu_with_gemini(caf_name: str, file_bytes: bytes, mime_type: str, tod
                     ),
                 )
                 parsed = json.loads(response.text)
-                items = parsed.get("today_items") if isinstance(parsed, dict) else []
-                if not isinstance(items, list):
-                    items = []
-                cleaned = [str(item).strip() for item in items if str(item).strip()]
-                print(f"[INFO] Gemini保険 {caf_name} ({today_key}曜) 抽出件数: {len(cleaned)} [model={model_name}]")
-                return cleaned
+                sections = parsed.get("sections") if isinstance(parsed, dict) else []
+                if not isinstance(sections, list):
+                    sections = []
+
+                normalized: list[dict] = []
+                for sec in sections:
+                    if not isinstance(sec, dict):
+                        continue
+                    cat = str(sec.get("category", "")).strip() or "本日のメニュー"
+                    raw_items = sec.get("items", [])
+                    if not isinstance(raw_items, list):
+                        continue
+                    clean_items = [str(i).strip() for i in raw_items if str(i).strip()]
+                    if clean_items:
+                        normalized.append({"category": cat, "items": clean_items})
+
+                if normalized:
+                    print(f"[INFO] Gemini整形成功 {caf_name} ({today_key}曜) [model={model_name}]")
+                    return normalized
             except Exception as exc:
                 last_exc = exc
                 msg = str(exc)
                 is_transient = ("503" in msg) or ("UNAVAILABLE" in msg) or ("429" in msg)
                 if is_transient and attempt < 2:
                     wait_sec = 2 * (2 ** attempt)
-                    print(f"[INFO] {caf_name} ({model_name}) 一時エラーのため {wait_sec}s 待機して再試行します...")
+                    print(f"[INFO] {caf_name} ({model_name}) 一時エラーのため {wait_sec}s 待機して再試行...")
                     time.sleep(wait_sec)
                     continue
                 break
 
-    print(f"[WARN] Gemini保険抽出失敗 ({caf_name}): {last_exc}")
+    print(f"[WARN] Gemini整形スキップ ({caf_name}): {last_exc}")
     return []
 
 
 def fetch_all_cafeterias(today_key: str) -> list[dict]:
-    """各食堂の献立画像を取得し、ローカルOCR（＋必要時Gemini保険）で今日の献立を付与する"""
+    """各食堂の献立画像を取得し、ローカルOCR＋Gemini整形で構造化データを生成する"""
     results: list[dict] = []
     ocr_engine = RapidOCR()
 
     for base in CAFETERIAS:
         img_url = base["image_url"]
-        today_items: list[str] = []
+        sections: list[dict] = []
+        fallback_items: list[str] = []
         source_method = "none"
 
         try:
@@ -183,20 +275,18 @@ def fetch_all_cafeterias(today_key: str) -> list[dict]:
             img_bytes = r.content
 
             crop_bytes = prepare_day_crop_bytes(img_bytes, today_key)
-            ocr_items = parse_menu_with_local_ocr(ocr_engine, base["name"], crop_bytes, today_key)
+            ocr_lines = run_local_ocr(ocr_engine, base["name"], crop_bytes, today_key)
 
-            if len(ocr_items) >= 3:
-                today_items = ocr_items
-                source_method = "local_ocr"
-            else:
-                # ローカルOCRで十分に取れなかった場合のみGeminiへフォールバック
-                gem_items = parse_menu_with_gemini(base["name"], crop_bytes, "image/png", today_key)
-                if gem_items:
-                    today_items = gem_items
-                    source_method = "gemini_fallback"
-                elif ocr_items:
-                    today_items = ocr_items
-                    source_method = "local_ocr_partial"
+            # 1. Geminiで切り抜き画像＋OCRテキストを自然なメニュー表に整形（503時はリトライ）
+            formatted_sections = format_menu_with_gemini(base, crop_bytes, ocr_lines, today_key)
+            if formatted_sections:
+                sections = formatted_sections
+                source_method = "ocr_plus_gemini"
+            elif ocr_lines:
+                # 2. Geminiが503等で落ちた場合のフォールバック（ローカルOCRのノイズ除去済み行）
+                fallback_items = ocr_lines
+                sections = [{"category": "抽出メニュー（簡易OCR）", "items": ocr_lines}]
+                source_method = "local_ocr_only"
 
         except Exception as exc:
             print(f"[WARN] 画像取得失敗 ({base['name']} / {img_url}): {exc}")
@@ -205,11 +295,11 @@ def fetch_all_cafeterias(today_key: str) -> list[dict]:
             "id": base["id"],
             "name": base["name"],
             "source_url": base["source_url"],
-            "links": [],
-            "images": [{"alt": f"{base['name']} 今週の献立表", "url": img_url}],
+            "image_url": img_url,
             "menu_parsed": {
                 "today_label": today_key,
-                "today_items": today_items,
+                "sections": sections,
+                "fallback_items": fallback_items,
                 "method": source_method,
             },
         })
@@ -217,35 +307,37 @@ def fetch_all_cafeterias(today_key: str) -> list[dict]:
     return results
 
 
-def format_today_description(caf: dict) -> str | None:
-    """Discord Embedのdescription用に今日の献立テキストを整形する"""
-    parsed = caf.get("menu_parsed") or {}
-    items = parsed.get("today_items") or []
-    if not items:
-        return None
-
-    day_label = parsed.get("today_label")
-    header = f"**{day_label}曜日の献立**" if day_label else "**今日の献立**"
-    lines = [f"・{item}" for item in items]
-    body = f"{header}\n" + "\n".join(lines)
-    return body if len(body) <= 3900 else body[:3897] + "..."
-
-
 def build_discord_embed(caf: dict, updated_at: str, today_str: str) -> dict:
-    """各食堂のDiscord Embedオブジェクトを組み立てる"""
+    """各食堂のDiscord Embedオブジェクトを視認性高く組み立てる"""
+    parsed = caf.get("menu_parsed") or {}
+    sections = parsed.get("sections") or []
+    img_url = caf.get("image_url", "")
+
     embed = {
-        "title": f"🍽️ {today_str} {caf['name']} 今週の献立",
-        "url": caf["source_url"],
+        "title": f"🍽️ {today_str} {caf['name']}",
+        "url": img_url or caf["source_url"],
         "color": 0x0F766E if caf["id"] == "cafeteria1" else 0x2563EB,
         "fields": [],
-        "footer": {"text": f"最終更新: {updated_at}"},
+        "footer": {"text": f"最終更新: {updated_at} ｜ タイトルクリックで献立画像を表示"},
     }
 
-    today_desc = format_today_description(caf)
-    if today_desc:
-        embed["description"] = today_desc
-    else:
-        embed["description"] = "本日の献立テキストを抽出できませんでした（休止日または画像未反映の可能性あり）。"
+    if not sections:
+        embed["description"] = "本日の献立を抽出できませんでした（休止日または画像未更新の可能性があります）。"
+        return embed
+
+    # 区分ごとにDiscord EmbedのFieldで見やすく表示
+    for sec in sections:
+        cat = sec.get("category", "メニュー")
+        items = sec.get("items", [])
+        if not items:
+            continue
+        value_lines = [f"・{item}" for item in items]
+        value_text = "\n".join(value_lines)
+        embed["fields"].append({
+            "name": f"▸ {cat}"[:250],
+            "value": value_text[:1000],
+            "inline": False,
+        })
 
     return embed
 
