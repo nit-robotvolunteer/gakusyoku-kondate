@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-11-26 20:49",
+  "updated_at": "2026-11-26 21:38",
   "source_url": "https://nitsc.co.jp/cafeteria/",
   "cafeterias": [
     {
@@ -13,7 +13,7 @@
       "method": "gemini",
       "model": "gemini-3.5-flash-lite",
       "parser_version": 3,
-      "parsed_at": "2026-11-26 20:49",
+      "parsed_at": "2026-11-26 21:38",
       "error": null,
       "days": [
         {
@@ -68,8 +68,7 @@
             {
               "category": "日替わりランチ",
               "items": [
-                "鶏むね竜田揚げ",
-                "油淋鶏ソース",
+                "鶏むね竜田揚げ油淋鶏ソース",
                 "ポテトサラダ"
               ],
               "status": null,
@@ -310,7 +309,7 @@
       "method": "gemini",
       "model": "gemini-3.5-flash-lite",
       "parser_version": 3,
-      "parsed_at": "2026-11-26 20:49",
+      "parsed_at": "2026-11-26 21:38",
       "error": null,
       "days": [
         {
