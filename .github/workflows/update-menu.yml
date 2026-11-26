@@ -10,6 +10,10 @@ on:
         description: "画像が同じでもGeminiで読み直す"
         type: boolean
         default: false
+      test_only:
+        description: "テスト用チャンネルにだけ通知する"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -47,7 +51,8 @@ jobs:
 
       - name: Run fetch_menu.py
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # 定期実行は本番へ。手動実行で「テスト用チャンネルにだけ」を選ぶとテスト用へ
+          DISCORD_WEBHOOK_URL: ${{ inputs.test_only && secrets.DISCORD_WEBHOOK_URL_TEST || secrets.DISCORD_WEBHOOK_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # 任意: 公開ページURL（通知にリンクが付く）、使うGeminiモデルの順番
           SITE_URL: ${{ vars.SITE_URL }}
