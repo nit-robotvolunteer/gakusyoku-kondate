@@ -64,11 +64,13 @@ SITE_URL = os.environ.get("SITE_URL", "").strip()
 GEMINI_MODELS = [
     m.strip()
     for m in (
-        os.environ.get("GEMINI_MODELS") or "gemini-flash-latest,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-2.5-flash"
+        os.environ.get("GEMINI_MODELS") or "gemini-3.5-flash-lite,gemini-3.8-flash,gemini-3.5-flash,gemini-flash-latest"
     ).split(",")
     if m.strip()
 ]
-GEMINI_TIMEOUT_MS = int(os.environ.get("GEMINI_TIMEOUT_MS") or "60000")
+GEMINI_TIMEOUT_MS = int(os.environ.get("GEMINI_TIMEOUT_MS") or "45000")
+# 1食堂あたりGeminiに使ってよい合計秒数。超えたら即OCRへ切り替えてワークフローを速く終わらせる
+GEMINI_BUDGET_S = float(os.environ.get("GEMINI_BUDGET_S") or "90")
 # "fallback"（既定）: OCRフォールバック時のみ原本の欄を添付 / "always" / "never"
 DISCORD_ATTACH = os.environ.get("DISCORD_ATTACH_IMAGE") or "fallback"
 
@@ -207,19 +209,40 @@ def parse_with_gemini(caf: dict, img_bytes: bytes) -> tuple[dict | None, str]:
     except ImportError as exc:
         return None, f"google-genai 未インストール: {exc}"
 
-    client = genai.Client(api_key=GEMINI_API_KEY, http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS))
+    # gemini-flash-latest などの別名は v1beta にしか無いので明示する
+    client = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options=types.HttpOptions(api_version="v1beta", timeout=GEMINI_TIMEOUT_MS),
+    )
     parts = [types.Part.from_bytes(data=img_bytes, mime_type="image/png"), build_gemini_prompt(caf)]
-    configs = []
-    try:  # 構造化出力（JSONスキーマ）対応SDKなら使う
-        configs.append(types.GenerateContentConfig(response_mime_type="application/json", response_json_schema=GEMINI_SCHEMA))
-    except Exception:
-        pass
-    configs.append(types.GenerateContentConfig(response_mime_type="application/json"))
+    def make_config(with_schema: bool):
+        kw = {"response_mime_type": "application/json"}
+        if with_schema:
+            kw["response_json_schema"] = GEMINI_SCHEMA
+        # 表の書き起こしに長い思考は不要。思考を減らすと 504（時間切れ）が起きにくく速い
+        for thinking in (
+            lambda: types.ThinkingConfig(thinking_level="low"),
+            lambda: types.ThinkingConfig(thinking_budget=512),
+            None,
+        ):
+            try:
+                if thinking is None:
+                    return types.GenerateContentConfig(**kw)
+                return types.GenerateContentConfig(thinking_config=thinking(), **kw)
+            except Exception:
+                continue
+        return None
+
+    configs = [c for c in (make_config(True), make_config(False)) if c is not None]
+    started = time.time()
 
     reasons = []
     for model in GEMINI_MODELS:
         cfg_i, attempt = 0, 0
         while cfg_i < len(configs):
+            if time.time() - started > GEMINI_BUDGET_S:
+                reasons.append(f"時間切れ（{GEMINI_BUDGET_S:.0f}秒）")
+                return None, " / ".join(reasons)
             t0 = time.time()
             try:
                 resp = client.models.generate_content(model=model, contents=parts, config=configs[cfg_i])
@@ -232,7 +255,11 @@ def parse_with_gemini(caf: dict, img_bytes: bytes) -> tuple[dict | None, str]:
                 msg = str(exc)
                 short = msg.splitlines()[0][:160] if msg else type(exc).__name__
                 print(f"[WARN] Gemini失敗 model={model}: {short}")
-                transient = any(k in msg for k in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "timed out", "Timeout"))
+                # thinking_level 非対応モデルは 400 になるので、思考設定なしで作り直して再試行
+                if "thinking" in msg.lower() and "400" in msg:
+                    configs = [types.GenerateContentConfig(**{k: v for k, v in c.model_dump(exclude_none=True).items() if k != "thinking_config"}) for c in configs]
+                    continue
+                transient = any(k in msg for k in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
                 if transient and attempt == 0:
                     attempt += 1
                     time.sleep(2)
@@ -293,37 +320,70 @@ REPLACE_MAP = {
 
 
 class LocalOCR:
-    """rapidocr(v3, PP-OCRv5: 日本語対応) を優先し、無ければ旧 rapidocr_onnxruntime を使う"""
+    """rapidocr(v3, PP-OCRv5: 日本語対応) を優先し、使えなければ既定モデル → 旧 rapidocr_onnxruntime の順に使う。
+
+    rapidocr はモデルを初回の読み取り時に読み込むため、設定ミスが後から例外になる。
+    read_lines() 側で捕まえて既定モデルに切り替え、ワークフロー全体は止めない。
+    """
 
     def __init__(self) -> None:
         self.engine = None
         self.kind = "none"
+        self._factory = None
         try:
             from rapidocr import RapidOCR  # type: ignore
 
-            try:
-                from rapidocr import LangRec  # type: ignore
-                from rapidocr.utils.typings import OCRVersion  # type: ignore
+            def v5():
+                import rapidocr as ro  # type: ignore
+                from rapidocr.utils import typings as ty  # type: ignore
 
-                self.engine = RapidOCR(params={
+                LangDet = getattr(ro, "LangDet", None) or ty.LangDet
+                LangRec = getattr(ro, "LangRec", None) or ty.LangRec
+                ModelType = getattr(ro, "ModelType", None) or ty.ModelType
+                OCRVersion = getattr(ro, "OCRVersion", None) or ty.OCRVersion
+
+                return RapidOCR(params={
                     "Det.ocr_version": OCRVersion.PPOCRV5,
+                    "Det.lang_type": LangDet.CH,
+                    "Det.model_type": ModelType.MOBILE,
                     "Rec.ocr_version": OCRVersion.PPOCRV5,
                     "Rec.lang_type": LangRec.CH,  # PP-OCRv5 の ch モデルは日本語も学習済み
+                    "Rec.model_type": ModelType.MOBILE,
                 })
-                self.kind = "rapidocr-ppocrv5"
-            except Exception as exc:
-                print(f"[WARN] PP-OCRv5 初期化失敗、既定モデルを使用: {exc}")
-                self.engine = RapidOCR()
-                self.kind = "rapidocr-default"
+
+            self._fallbacks = [("rapidocr-ppocrv5", v5), ("rapidocr-default", lambda: RapidOCR())]
         except ImportError:
-            try:
+            def legacy():
                 from rapidocr_onnxruntime import RapidOCR  # type: ignore
 
-                self.engine = RapidOCR()
-                self.kind = "rapidocr_onnxruntime"
-            except ImportError:
-                print("[WARN] OCRエンジンが見つかりません")
-        print(f"[INFO] OCRエンジン: {self.kind}")
+                return RapidOCR()
+
+            self._fallbacks = [("rapidocr_onnxruntime", legacy)]
+        self._next_engine()
+
+    def _next_engine(self) -> bool:
+        while self._fallbacks:
+            kind, factory = self._fallbacks.pop(0)
+            try:
+                self.engine = factory()
+                self.kind = kind
+                print(f"[INFO] OCRエンジン: {kind}")
+                return True
+            except Exception as exc:
+                print(f"[WARN] OCRエンジン {kind} を初期化できません: {exc}")
+        self.engine = None
+        self.kind = "none"
+        print("[WARN] 使えるOCRエンジンがありません")
+        return False
+
+    def _run(self, arr):
+        while self.engine is not None:
+            try:
+                return self.engine(arr)
+            except Exception as exc:
+                print(f"[WARN] OCRエンジン {self.kind} の実行に失敗、次の候補に切り替えます: {exc}")
+                self._next_engine()
+        return None
 
     def read_lines(self, img: Image.Image) -> list[tuple[float, float, float, str, float]]:
         """(x0, y_center, x1, text, score) のリスト"""
@@ -332,7 +392,9 @@ class LocalOCR:
         import numpy as np
 
         arr = np.array(img.convert("RGB"))
-        res = self.engine(arr)
+        res = self._run(arr)
+        if res is None:
+            return []
         out = []
         if hasattr(res, "txts"):  # rapidocr v2/v3
             boxes, txts, scores = res.boxes, res.txts, res.scores
@@ -672,7 +734,16 @@ def main() -> None:
 
     cafeterias, crops = [], {}
     for caf in CAFETERIAS:
-        res, crop = process_cafeteria(caf, today, prev, ocr_holder, args.local_dir)
+        try:
+            res, crop = process_cafeteria(caf, today, prev, ocr_holder, args.local_dir)
+        except Exception as exc:  # 1食堂の失敗で通知全体を止めない
+            import traceback
+
+            traceback.print_exc()
+            res = {**(prev.get(caf["id"]) or {"id": caf["id"], "name": caf["name"], "image_url": caf["image_url"],
+                                                "source_url": caf["source_url"], "days": [], "weekly": []}),
+                   "method": "none", "error": f"処理失敗: {exc}"}
+            crop = b""
         # 今日の日付が献立表の日付に含まれなければ「未更新」の可能性
         today_label = f"{today.month}/{today.day}"
         if res["days"] and today.weekday() < 6:
