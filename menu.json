@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-11-26 20:24",
+  "updated_at": "2026-11-26 20:49",
   "source_url": "https://nitsc.co.jp/cafeteria/",
   "cafeterias": [
     {
@@ -9,11 +9,11 @@
       "short": "ダイニング",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria1",
       "image_url": "https://nitsc.co.jp/userdata/1menu.png",
-      "image_hash": "87b55dc05b14349e7dec194a9cb091dfc779e163fa03d9a14d9384766afe6bc1",
+      "image_hash": "a8023a0d8138956b32a33bec630292e45b2ab2a5148d262d8d3caef60ebcd6ab",
       "method": "gemini",
-      "model": "manual-check",
+      "model": "gemini-3.5-flash-lite",
       "parser_version": 3,
-      "parsed_at": "2026-11-26 20:21",
+      "parsed_at": "2026-11-26 20:49",
       "error": null,
       "days": [
         {
@@ -31,7 +31,7 @@
             {
               "category": "日替わりランチ",
               "items": [
-                "ジャンダレチキンステーキ",
+                "あまにどりジャンダレチキンステーキ",
                 "揚げ餃子"
               ],
               "status": null,
@@ -68,7 +68,8 @@
             {
               "category": "日替わりランチ",
               "items": [
-                "鶏むね竜田揚げ 油淋鶏ソース",
+                "鶏むね竜田揚げ",
+                "油淋鶏ソース",
                 "ポテトサラダ"
               ],
               "status": null,
@@ -113,7 +114,6 @@
               "kcal": 810,
               "allergens": [
                 "卵",
-                "乳",
                 "小麦",
                 "えび",
                 "かに"
@@ -306,11 +306,11 @@
       "short": "トレビ",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria2",
       "image_url": "https://nitsc.co.jp/userdata/2menu.png",
-      "image_hash": "249e67c7b8d79531ff89b0335ccef736429222e73f1bdeb27627dfd005202eab",
+      "image_hash": "d60b8d80ddb647a81b9554a36246fef1140fe12c967a8a110118108d60b2b2b0",
       "method": "gemini",
-      "model": "manual-check",
+      "model": "gemini-3.5-flash-lite",
       "parser_version": 3,
-      "parsed_at": "2026-11-26 20:21",
+      "parsed_at": "2026-11-26 20:49",
       "error": null,
       "days": [
         {
@@ -407,7 +407,7 @@
             {
               "category": "日替わりランチ（並）",
               "items": [
-                "鶏の竜田揚げ 和風ネギ塩ソース",
+                "鶏の竜田揚げ和風ネギ塩ソース",
                 "ロールキャベツ"
               ],
               "status": null,
