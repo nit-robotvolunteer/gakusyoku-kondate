@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-11-26 11:52",
+  "updated_at": "2026-11-26 14:28",
   "source_url": "https://nitsc.co.jp/cafeteria/",
   "cafeterias": [
     {
@@ -8,11 +8,7 @@
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria1",
       "links": [],
       "images": [],
-      "menu_parsed": {
-        "today_label": "木",
-        "today_items": [],
-        "weekly": {}
-      }
+      "menu_parsed": {}
     },
     {
       "id": "cafeteria2",
@@ -20,11 +16,7 @@
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria2",
       "links": [],
       "images": [],
-      "menu_parsed": {
-        "today_label": "木",
-        "today_items": [],
-        "weekly": {}
-      }
+      "menu_parsed": {}
     }
   ]
 }
