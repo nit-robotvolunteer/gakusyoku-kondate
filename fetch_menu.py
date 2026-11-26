@@ -3,6 +3,7 @@ import os
 import re
 import tempfile
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -16,6 +17,10 @@ FALLBACK_NAMES = {
     "cafeteria1": "ダイニングホール",
     "cafeteria2": "キッチン＆カフェトレビ",
 }
+FALLBACK_IMAGE_HINTS = {
+    "cafeteria1": ["1menu", "menu1", "dining", "hall"],
+    "cafeteria2": ["2menu", "menu2", "trevi", "kitchen"],
+}
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
@@ -28,53 +33,111 @@ HEADERS = {
     )
 }
 
+URL_ATTRS = ["href", "src", "data-src", "data-fancybox-src", "data-href", "data-lazy-src"]
+
+
+def clean_text(val: str | None) -> str:
+    return re.sub(r"\s+", " ", (val or "").strip())
+
 
 def extract_section_title(section, sec_id: str) -> str:
     """セクション内の見出し（h1〜h4）から食堂名を取得し、無ければ固定名を返す"""
     if section:
         heading = section.find(["h1", "h2", "h3", "h4"])
         if heading:
-            text = re.sub(r"\s+", " ", heading.get_text(strip=True))
+            text = clean_text(heading.get_text())
             if text:
                 return text
     return FALLBACK_NAMES.get(sec_id, f"食堂 ({sec_id})")
 
 
-def parse_single_cafeteria(soup: BeautifulSoup, sec_id: str) -> dict:
-    """指定セクションIDの献立リンク・画像URLを抽出する"""
-    section = soup.find(id=sec_id)
-    if not section:
-        anchor = soup.find(attrs={"name": sec_id})
-        section = anchor.parent if anchor else None
+def collect_media_from_container(container, default_title: str) -> tuple[list[dict], list[dict]]:
+    """指定コンテナ内のリンク・画像候補（data-* 属性含む）を収集する"""
+    links: list[dict] = []
+    images: list[dict] = []
+    seen_links: set[str] = set()
+    seen_images: set[str] = set()
 
-    title = extract_section_title(section, sec_id)
-    links = []
-    images = []
-    seen_links = set()
-    seen_images = set()
+    if not container:
+        return links, images
 
-    if section:
-        for a in section.find_all("a", href=True):
-            href = requests.compat.urljoin(TARGET_URL, a["href"])
-            text = re.sub(r"\s+", " ", a.get_text(strip=True))
-            if any(k in (text + href).lower() for k in ["献立", "メニュー", "menu", "kondate", ".pdf"]):
-                if href not in seen_links:
-                    seen_links.add(href)
+    for el in container.find_all(["a", "img", "button", "div", "figure"]):
+        label = clean_text(el.get("alt") or el.get("data-caption") or el.get_text())
+        for attr in URL_ATTRS:
+            raw_val = el.get(attr)
+            if not raw_val or not isinstance(raw_val, str):
+                continue
+            raw_val = raw_val.strip()
+            if raw_val.startswith("#") or raw_val.lower().startswith("javascript:"):
+                continue
+
+            full_url = urljoin(TARGET_URL, raw_val)
+            lower = full_url.lower()
+            combined = f"{label} {full_url}".lower()
+
+            if ".pdf" in lower:
+                if full_url not in seen_links:
+                    seen_links.add(full_url)
                     links.append({
-                        "title": text or f"{title} 今週の献立表",
-                        "url": href,
+                        "title": label or f"{default_title} 今週の献立表",
+                        "url": full_url,
                     })
+            elif any(ext in lower for ext in [".png", ".jpg", ".jpeg", ".webp"]) or "userdata/" in lower:
+                if any(k in combined for k in ["menu", "kondate", "献立", "userdata", "lunch", "food", "trevi"]):
+                    if full_url not in seen_images:
+                        seen_images.add(full_url)
+                        images.append({
+                            "alt": label or default_title,
+                            "url": full_url,
+                        })
 
-        for img in section.find_all("img", src=True):
-            src = requests.compat.urljoin(TARGET_URL, img["src"])
-            alt = re.sub(r"\s+", " ", img.get("alt", ""))
-            if any(k in (alt + src).lower() for k in ["献立", "menu", "kondate", "lunch", "food", "trevi"]):
-                if src not in seen_images:
-                    seen_images.add(src)
-                    images.append({
-                        "alt": alt or title,
-                        "url": src,
-                    })
+    return links, images
+
+
+def find_section_element(soup: BeautifulSoup, sec_id: str, index: int):
+    """セクション要素をID/アンカー/クラス順で探す"""
+    section = soup.find(id=sec_id)
+    if section:
+        return section
+
+    anchor = soup.find(attrs={"name": sec_id})
+    if anchor and anchor.parent:
+        return anchor.parent
+
+    caf_blocks = soup.find_all("div", class_=re.compile(r"\bcafeteria\b", re.I))
+    if index < len(caf_blocks):
+        return caf_blocks[index]
+
+    return None
+
+
+def parse_single_cafeteria(soup: BeautifulSoup, sec_id: str, index: int) -> dict:
+    """指定セクションIDの献立リンク・画像URLを抽出する"""
+    section = find_section_element(soup, sec_id, index)
+    title = extract_section_title(section, sec_id)
+
+    links, images = collect_media_from_container(section, title)
+
+    # セクション内で画像が見つからない場合、ページ全体から該当食堂らしい画像を補完
+    if not images:
+        _, page_images = collect_media_from_container(soup.body or soup, title)
+        hints = FALLBACK_IMAGE_HINTS.get(sec_id, [])
+        matched = [img for img in page_images if any(h in img["url"].lower() for h in hints)]
+        if matched:
+            images = matched
+        elif index < len(page_images):
+            images = [page_images[index]]
+
+    # それでも見つからない場合の userdata/1menu.png, 2menu.png フォールバック
+    if not images and not links:
+        menu_num = index + 1
+        fallback_img_url = urljoin(TARGET_URL, f"../userdata/{menu_num}menu.png")
+        images.append({
+            "alt": f"{title} 献立表",
+            "url": fallback_img_url,
+        })
+
+    print(f"[INFO] {title}: links={len(links)}, images={[i['url'] for i in images]}")
 
     return {
         "id": sec_id,
@@ -92,7 +155,10 @@ def fetch_cafeteria_sections() -> list[dict]:
     res.raise_for_status()
     res.encoding = res.apparent_encoding
     soup = BeautifulSoup(res.text, "html.parser")
-    return [parse_single_cafeteria(soup, sec_id) for sec_id in SECTION_IDS]
+    return [
+        parse_single_cafeteria(soup, sec_id, idx)
+        for idx, sec_id in enumerate(SECTION_IDS)
+    ]
 
 
 def extract_pdf_text_if_available(pdf_bytes: bytes) -> str:
@@ -158,9 +224,12 @@ def parse_menu_with_gemini(caf_name: str, file_bytes: bytes, mime_type: str, tod
         if not isinstance(today_items, list):
             today_items = []
 
+        cleaned_items = [str(item).strip() for item in today_items if str(item).strip()]
+        print(f"[INFO] {caf_name} ({today_key}曜) 抽出件数: {len(cleaned_items)}")
+
         return {
             "today_label": today_key,
-            "today_items": [str(item).strip() for item in today_items if str(item).strip()],
+            "today_items": cleaned_items,
             "weekly": weekly,
         }
     except Exception as exc:
@@ -189,17 +258,22 @@ def attach_extracted_menus(cafeterias: list[dict], today_key: str) -> list[dict]
                 except Exception as exc:
                     print(f"[WARN] PDF取得失敗 ({caf['name']}): {exc}")
 
-        if not extracted.get("weekly") and caf.get("images"):
-            img_url = caf["images"][0]["url"]
-            try:
-                r = requests.get(img_url, headers=HEADERS, timeout=25)
-                r.raise_for_status()
-                ctype = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-                if not ctype.startswith("image/"):
-                    ctype = "image/png" if img_url.lower().endswith(".png") else "image/jpeg"
-                extracted = parse_menu_with_gemini(caf["name"], r.content, ctype, today_key)
-            except Exception as exc:
-                print(f"[WARN] 画像取得失敗 ({caf['name']}): {exc}")
+        if not extracted.get("weekly"):
+            for img in caf.get("images", []):
+                img_url = img.get("url", "")
+                if not img_url:
+                    continue
+                try:
+                    r = requests.get(img_url, headers=HEADERS, timeout=25)
+                    r.raise_for_status()
+                    ctype = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                    if not ctype.startswith("image/"):
+                        ctype = "image/png" if ".png" in img_url.lower() else "image/jpeg"
+                    extracted = parse_menu_with_gemini(caf["name"], r.content, ctype, today_key)
+                    if extracted.get("weekly"):
+                        break
+                except Exception as exc:
+                    print(f"[WARN] 画像取得失敗 ({caf['name']} / {img_url}): {exc}")
 
         caf["menu_parsed"] = extracted
 
@@ -233,19 +307,8 @@ def build_discord_embed(caf: dict, updated_at: str, today_str: str) -> dict:
     today_desc = format_today_description(caf)
     if today_desc:
         embed["description"] = today_desc
-
-    for link in caf.get("links", []):
-        embed["fields"].append({
-            "name": link["title"][:250],
-            "value": f"[献立表を開く]({link['url']})"[:1000],
-            "inline": False,
-        })
-
-    if not today_desc and not caf.get("links") and not caf.get("images"):
-        embed["description"] = f"献立リンク・画像が未検出です。[ページを確認]({caf['source_url']})"
-
-    if caf.get("images"):
-        embed["image"] = {"url": caf["images"][0]["url"]}
+    else:
+        embed["description"] = "本日の献立テキストを抽出できませんでした（休止日または画像未反映の可能性あり）。"
 
     return embed
 
