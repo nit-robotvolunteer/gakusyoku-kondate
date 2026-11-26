@@ -1,209 +1,511 @@
 :root {
-  --bg: #f4f6f8;
-  --card: #ffffff;
-  --text: #1e293b;
-  --sub: #64748b;
-  --accent: #0f766e;
-  --border: #e2e8f0;
+  --page: #edf0ec;
+  --paper: #ffffff;
+  --ink: #1b201d;
+  --ink-2: #57605a;
+  --line: #d3d9d3;
+  --perf: #b9c2ba;
+  --dining: #0f766e;
+  --trebi: #2563eb;
+  --allergen: #b42318;
+  --allergen-bg: #fdecea;
+  --caution-bg: #fff6dc;
+  --caution-ink: #6b4e00;
+
+  --font-round: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif;
+  --font-body: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, system-ui, sans-serif;
+
+  --step--1: 0.8125rem;
+  --step-0: 1rem;
+  --step-1: 1.1875rem;
+  --step-2: 1.4375rem;
 }
 
-* {
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #151916;
+    --paper: #1f2521;
+    --ink: #e9eee9;
+    --ink-2: #a3aea6;
+    --line: #333b35;
+    --perf: #4a544d;
+    --dining: #2dd4bf;
+    --trebi: #7aa5ff;
+    --allergen: #ff8a80;
+    --allergen-bg: #3a2220;
+    --caution-bg: #3a3218;
+    --caution-ink: #f5d98a;
+  }
+}
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--text);
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--step-0);
   line-height: 1.6;
-  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
 
-.app-header {
-  background: var(--card);
-  padding: 14px 16px 0;
-  border-bottom: 1px solid var(--border);
+a {
+  color: inherit;
+  text-underline-offset: 0.2em;
+}
+
+:focus-visible {
+  outline: 3px solid var(--trebi);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---------- ヘッダーと曜日バー ---------- */
+.top {
   position: sticky;
   top: 0;
   z-index: 10;
+  background: color-mix(in srgb, var(--page) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  padding-top: env(safe-area-inset-top);
 }
 
-.header-top {
+.top-inner {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 12px 16px 4px;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
 }
 
-.app-header h1 {
-  font-size: 1.15rem;
+.brand {
+  margin: 0;
+  font-family: var(--font-round);
+  font-weight: 900;
+  font-size: var(--step-1);
+  letter-spacing: 0.04em;
 }
 
-.meta {
-  font-size: 0.78rem;
-  color: var(--sub);
-  white-space: nowrap;
+.updated {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
 }
 
-.tabs {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 10px;
+.days {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 6px 12px 10px;
 }
 
-.tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.tab-btn {
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-  padding: 6px 14px;
-  border-radius: 999px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.tab-btn.is-active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #ffffff;
-}
-
-.container {
-  max-width: 760px;
-  margin: 16px auto;
-  padding: 0 16px 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.cafeteria-block {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.cafeteria-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.cafeteria-heading h2 {
-  font-size: 1.05rem;
-  color: var(--text);
-}
-
-.source-link {
-  font-size: 0.8rem;
-  color: var(--accent);
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.card {
-  background: var(--card);
-  border-radius: 12px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-.card h3 {
-  font-size: 0.95rem;
-  margin-bottom: 10px;
-  color: var(--accent);
-}
-
-.today-card {
-  border-left: 4px solid var(--accent);
-}
-
-.today-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.today-list li {
-  padding: 6px 10px;
-  background: var(--bg);
-  border-radius: 6px;
-  font-size: 0.95rem;
-  font-weight: 500;
-}
-
-.muted-text {
-  font-size: 0.88rem;
-  color: var(--sub);
-}
-
-.weekly-details {
-  margin-top: 12px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-
-.weekly-details summary {
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--accent);
-}
-
-.weekly-grid {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.85rem;
-}
-
-.weekly-row {
+.day-tabs {
   display: grid;
-  grid-template-columns: 3.2rem 1fr;
-  gap: 8px;
-  align-items: baseline;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
 }
 
-.menu-img {
-  width: 100%;
-  height: auto;
-  border-radius: 8px;
-  display: block;
+.day-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 9px 0 7px;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  min-height: 52px;
 }
 
-.pdf-frame {
-  width: 100%;
-  height: 65vh;
-  border: none;
-  border-radius: 8px;
+.day-tab-key {
+  font-family: var(--font-round);
+  font-weight: 700;
+  font-size: var(--step-1);
+  line-height: 1.2;
 }
 
-.btn {
+.day-tab-date {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.day-tab-today {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--page);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.day-tab[aria-selected="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--page);
+}
+
+.day-tab[aria-selected="true"] .day-tab-date {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.day-tab[aria-selected="true"] .day-tab-today {
+  background: var(--page);
+  color: var(--ink);
+  box-shadow: 0 0 0 1.5px var(--ink);
+}
+
+/* ---------- 本体 ---------- */
+.page {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 16px 16px 40px;
+}
+
+.notice {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--caution-bg);
+  color: var(--caution-ink);
+  font-size: 0.9rem;
+}
+
+.filter {
+  margin-bottom: 18px;
+  font-size: 0.9rem;
+}
+
+.filter summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  font-weight: 600;
+  width: fit-content;
+}
+
+.filter-count {
+  color: var(--allergen);
+}
+
+.filter-help {
+  margin: 6px 0 8px;
+  color: var(--ink-2);
+  font-size: var(--step--1);
+}
+
+.filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  position: relative;
   display: inline-flex;
+}
+
+.chip input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.chip span {
+  padding: 4px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+}
+
+.chip input:checked + span {
+  border-color: var(--allergen);
+  background: var(--allergen-bg);
+  color: var(--allergen);
+  font-weight: 700;
+}
+
+.chip input:focus-visible + span {
+  outline: 3px solid var(--trebi);
+  outline-offset: 2px;
+}
+
+.cafeterias {
+  display: grid;
+  gap: 32px;
+}
+
+@media (min-width: 820px) {
+  .cafeterias {
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    align-items: start;
+  }
+}
+
+/* ---------- 食堂 ---------- */
+.caf {
+  --accent: var(--dining);
+}
+
+.caf[data-caf="cafeteria2"] {
+  --accent: var(--trebi);
+}
+
+.caf-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 3px solid var(--accent);
+}
+
+.caf-name {
+  margin: 0;
+  font-family: var(--font-round);
+  font-weight: 900;
+  font-size: var(--step-2);
+  line-height: 1.3;
+}
+
+.caf-source {
+  flex-shrink: 0;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
+.caf-caution {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--caution-bg);
+  color: var(--caution-ink);
+  font-size: var(--step--1);
+}
+
+.caf-caution a {
+  margin-left: 4px;
+  font-weight: 700;
+}
+
+.caf-empty {
+  margin: 0;
+  padding: 18px 16px;
+  border: 1.5px dashed var(--line);
+  border-radius: 12px;
+  color: var(--ink-2);
+}
+
+.caf-closed {
+  margin: 10px 2px 0;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
+/* ---------- 食券 ---------- */
+.tickets {
+  display: grid;
+  gap: 12px;
+}
+
+.ticket {
+  --notch: 9px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.4rem 1fr;
+  background: var(--paper);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  /* 半券とのあいだの切り欠き */
+  -webkit-mask:
+    radial-gradient(circle at 2.4rem 0, transparent var(--notch), #000 calc(var(--notch) + 0.5px)) top / 100% 51% no-repeat,
+    radial-gradient(circle at 2.4rem 100%, transparent var(--notch), #000 calc(var(--notch) + 0.5px)) bottom / 100% 51% no-repeat;
+  mask:
+    radial-gradient(circle at 2.4rem 0, transparent var(--notch), #000 calc(var(--notch) + 0.5px)) top / 100% 51% no-repeat,
+    radial-gradient(circle at 2.4rem 100%, transparent var(--notch), #000 calc(var(--notch) + 0.5px)) bottom / 100% 51% no-repeat;
+}
+
+.ticket-stub {
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  padding: 12px 0;
   background: var(--accent);
   color: #fff;
-  text-decoration: none;
-  padding: 10px 16px;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 600;
+  border-right: 2px dashed var(--perf);
+  border-radius: 12px 0 0 12px;
+}
+
+.ticket-stub span {
+  /* 長い区分名は2列に折り返して食券が縦に伸びすぎないようにする */
+  max-inline-size: 7em;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-family: var(--font-round);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  max-height: 100%;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ticket-stub {
+    color: #0f1411;
+  }
+}
+
+.ticket-body {
+  padding: 12px 16px 13px;
+  min-width: 0;
+}
+
+/* 区分名は半券の縦書きで伝えるので、画面読み上げ用にだけ残す */
+.ticket-cat {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.ticket-main {
+  margin: 0;
+  font-family: var(--font-round);
+  font-weight: 700;
+  font-size: var(--step-1);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.ticket-sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  margin: 3px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-size: 0.9375rem;
+}
+
+.ticket-sides li::before {
+  content: "＋";
+  margin-right: 1px;
+}
+
+.ticket-sides li + li {
+  margin-left: 10px;
+}
+
+.ticket-note {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+.ticket-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
   margin-top: 10px;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.kcal b {
+  font-size: 0.875rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.allergens {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.allergen {
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--allergen) 35%, transparent);
+  color: var(--allergen);
+  line-height: 1.6;
+}
+
+.allergen.is-hit {
+  background: var(--allergen);
+  border-color: var(--allergen);
+  color: var(--paper);
+  font-weight: 700;
+}
+
+.ticket-warn {
+  margin: 8px 0 0;
+  font-size: var(--step--1);
+  font-weight: 700;
+  color: var(--allergen);
+}
+
+.ticket.is-avoided .ticket-main,
+.ticket.is-avoided .ticket-sides {
+  opacity: 0.45;
+}
+
+.ticket.is-avoided .ticket-stub {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+
+/* ---------- その他 ---------- */
+.load-error {
+  padding: 20px;
+  border-radius: 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.load-error p {
+  margin: 0 0 8px;
+}
+
+.foot {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 16px calc(32px + env(safe-area-inset-bottom));
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .day-tab {
+    transition: background-color 0.12s, color 0.12s;
+  }
 }

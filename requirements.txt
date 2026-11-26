@@ -1,0 +1,7 @@
+requests
+google-genai>=1.30
+pillow
+numpy
+scipy
+rapidocr>=3.4
+onnxruntime

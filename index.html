@@ -2,20 +2,41 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>学食 今週の献立</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#EDF0EC" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#151916" media="(prefers-color-scheme: dark)">
+  <title>学食メニュー</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="app-header">
-    <div class="header-top">
-      <h1>学食 今週の献立</h1>
-      <span id="updated-at" class="meta">読み込み中...</span>
+  <header class="top">
+    <div class="top-inner">
+      <h1 class="brand">学食メニュー</h1>
+      <p id="updated-at" class="updated" aria-live="polite">読み込み中…</p>
     </div>
-    <nav id="tabs" class="tabs" aria-label="食堂切り替え"></nav>
+    <nav class="days" aria-label="曜日を選ぶ">
+      <div id="day-tabs" class="day-tabs" role="tablist"></div>
+    </nav>
   </header>
 
-  <main id="app" class="container"></main>
+  <main class="page">
+    <div id="notice" class="notice" hidden></div>
+
+    <details id="allergen-filter" class="filter">
+      <summary>アレルゲンで絞り込む<span id="filter-count" class="filter-count"></span></summary>
+      <p class="filter-help">選んだアレルゲンを含むメニューを薄く表示します。</p>
+      <div id="allergen-options" class="filter-options"></div>
+    </details>
+
+    <div id="app" class="cafeterias" aria-live="polite"></div>
+  </main>
+
+  <footer class="foot">
+    <p>献立表の画像を自動で読み取っています。正確な内容は<a href="https://nitsc.co.jp/cafeteria/" target="_blank" rel="noopener">公式の献立表</a>をご確認ください。</p>
+  </footer>
 
   <script src="app.js"></script>
 </body>

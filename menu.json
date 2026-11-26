@@ -1,80 +1,528 @@
 {
-  "updated_at": "2026-11-26 19:45",
+  "schema_version": 2,
+  "updated_at": "2026-11-26 20:24",
   "source_url": "https://nitsc.co.jp/cafeteria/",
   "cafeterias": [
     {
       "id": "cafeteria1",
       "name": "ダイニングホール",
+      "short": "ダイニング",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria1",
       "image_url": "https://nitsc.co.jp/userdata/1menu.png",
-      "image_hash": "a8023a0d8138956b32a33bec630292e45b2ab2a5148d262d8d3caef60ebcd6ab",
-      "menu_parsed": {
-        "today_label": "木",
-        "sections": [
-          {
-            "category": "抽出メニュー（簡易OCR）",
-            "items": [
-              "カツ重",
-              "琉球ポーク",
-              "温玉",
-              "廿亏夕",
-              "黑胡椒加弓",
-              "温玉",
-              "おでん定食",
-              "ミニオムレツ"
-            ]
-          }
-        ],
-        "fallback_items": [
-          "カツ重",
-          "琉球ポーク",
-          "温玉",
-          "廿亏夕",
-          "黑胡椒加弓",
-          "温玉",
-          "おでん定食",
-          "ミニオムレツ"
-        ],
-        "method": "local_ocr_only"
-      }
+      "image_hash": "87b55dc05b14349e7dec194a9cb091dfc779e163fa03d9a14d9384766afe6bc1",
+      "method": "gemini",
+      "model": "manual-check",
+      "parser_version": 3,
+      "parsed_at": "2026-11-26 20:21",
+      "error": null,
+      "days": [
+        {
+          "key": "月",
+          "date": "11/23",
+          "sections": [
+            {
+              "category": "スペシャルランチ",
+              "items": [],
+              "status": "休売",
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            },
+            {
+              "category": "日替わりランチ",
+              "items": [
+                "ジャンダレチキンステーキ",
+                "揚げ餃子"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1141,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "日工大ランチ",
+              "items": [],
+              "status": "休売",
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            }
+          ]
+        },
+        {
+          "key": "火",
+          "date": "11/24",
+          "sections": [
+            {
+              "category": "スペシャルランチ",
+              "items": [],
+              "status": "休売",
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            },
+            {
+              "category": "日替わりランチ",
+              "items": [
+                "鶏むね竜田揚げ 油淋鶏ソース",
+                "ポテトサラダ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1083,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "日工大ランチ",
+              "items": [
+                "鶏カシューナッツ炒め",
+                "サラダ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 702,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "水",
+          "date": "11/25",
+          "sections": [
+            {
+              "category": "スペシャルランチ",
+              "items": [
+                "極太つけ麺 魚介とんこつ（麺400g）"
+              ],
+              "status": null,
+              "notes": [
+                "大盛は出来ません"
+              ],
+              "kcal": 810,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦",
+                "えび",
+                "かに"
+              ]
+            },
+            {
+              "category": "日替わりランチ",
+              "items": [
+                "鶏からあげ",
+                "マカロニサラダ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1136,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "日工大ランチ",
+              "items": [
+                "旨辛味噌もつ煮",
+                "野菜コロッケ",
+                "おしんこ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 629,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "木",
+          "date": "11/26",
+          "sections": [
+            {
+              "category": "スペシャルランチ",
+              "items": [
+                "桐生ソースカツ重",
+                "温玉",
+                "サラダ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1215,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "日替わりランチ",
+              "items": [
+                "デミグラスハンバーグ",
+                "むね竜田",
+                "ミニオムレツ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1019,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "日工大ランチ",
+              "items": [
+                "中華丼",
+                "春巻"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 645,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦",
+                "えび",
+                "かに"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "金",
+          "date": "11/27",
+          "sections": [
+            {
+              "category": "スペシャルランチ",
+              "items": [
+                "メガランチ 琉球ポークラフテー重",
+                "温玉",
+                "サラダ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1104,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "日替わりランチ",
+              "items": [
+                "黒胡椒からあげ",
+                "温玉"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1147,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "日工大ランチ",
+              "items": [
+                "おでん定食",
+                "ミニハムカツ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 612,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "土",
+          "date": "11/28",
+          "sections": [
+            {
+              "category": "スペシャルランチ",
+              "items": [],
+              "status": null,
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            },
+            {
+              "category": "日替わりランチ",
+              "items": [
+                "チキンカツ",
+                "マカロニサラダ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1168,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "日工大ランチ",
+              "items": [],
+              "status": null,
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            }
+          ]
+        }
+      ],
+      "weekly": [],
+      "stale": false
     },
     {
       "id": "cafeteria2",
       "name": "キッチン＆カフェトレビ",
+      "short": "トレビ",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria2",
       "image_url": "https://nitsc.co.jp/userdata/2menu.png",
-      "image_hash": "d60b8d80ddb647a81b9554a36246fef1140fe12c967a8a110118108d60b2b2b0",
-      "menu_parsed": {
-        "today_label": "木",
-        "sections": [
-          {
-            "category": "抽出メニュー（簡易OCR）",
-            "items": [
-              "揚件",
-              "盒/一7",
-              "7仆补",
-              "&人夕",
-              "小井",
-              "休止",
-              "贩壳",
-              "贩壳",
-              "调替夏季"
-            ]
-          }
-        ],
-        "fallback_items": [
-          "揚件",
-          "盒/一7",
-          "7仆补",
-          "&人夕",
-          "小井",
-          "休止",
-          "贩壳",
-          "贩壳",
-          "调替夏季"
-        ],
-        "method": "local_ocr_only"
-      }
+      "image_hash": "249e67c7b8d79531ff89b0335ccef736429222e73f1bdeb27627dfd005202eab",
+      "method": "gemini",
+      "model": "manual-check",
+      "parser_version": 3,
+      "parsed_at": "2026-11-26 20:21",
+      "error": null,
+      "days": [
+        {
+          "key": "月",
+          "date": "11/23",
+          "sections": [
+            {
+              "category": "日替わりランチ（並）",
+              "items": [
+                "とろたまチキングリル",
+                "ハーフメンチカツ＆パスタ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1113,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "鉄板ランチ",
+              "items": [],
+              "status": "休止",
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            }
+          ]
+        },
+        {
+          "key": "火",
+          "date": "11/24",
+          "sections": [
+            {
+              "category": "日替わりランチ（並）",
+              "items": [
+                "温玉のせピリ辛焼肉丼",
+                "コロッケ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1329,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "鉄板ランチ",
+              "items": [],
+              "status": "休止",
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            }
+          ]
+        },
+        {
+          "key": "水",
+          "date": "11/25",
+          "sections": [
+            {
+              "category": "日替わりランチ（並）",
+              "items": [
+                "テリヤキ月見ハンバーグ",
+                "カリーヴルスト（ウィンナー＆ポテト）"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1064,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "鉄板ランチ",
+              "items": [],
+              "status": "休止",
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            }
+          ]
+        },
+        {
+          "key": "木",
+          "date": "11/26",
+          "sections": [
+            {
+              "category": "日替わりランチ（並）",
+              "items": [
+                "鶏の竜田揚げ 和風ネギ塩ソース",
+                "ロールキャベツ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 942,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "鉄板ランチ",
+              "items": [
+                "鉄鍋ビビンバ丼"
+              ],
+              "status": null,
+              "notes": [
+                "11時半より販売致します",
+                "オムライスの販売は休止致します"
+              ],
+              "kcal": 1036,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦",
+                "えび"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "金",
+          "date": "11/27",
+          "sections": [
+            {
+              "category": "日替わりランチ（並）",
+              "items": [
+                "チキンのトマトクリームシチュー",
+                "フライドポテト＆パスタ"
+              ],
+              "status": null,
+              "notes": [],
+              "kcal": 1058,
+              "allergens": [
+                "卵",
+                "乳",
+                "小麦"
+              ]
+            },
+            {
+              "category": "鉄板ランチ",
+              "items": [],
+              "status": "休止",
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            }
+          ]
+        },
+        {
+          "key": "土",
+          "date": "11/28",
+          "sections": [
+            {
+              "category": "日替わりランチ（並）",
+              "items": [],
+              "status": "休み",
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            },
+            {
+              "category": "鉄板ランチ",
+              "items": [],
+              "status": null,
+              "notes": [],
+              "kcal": null,
+              "allergens": []
+            }
+          ]
+        }
+      ],
+      "weekly": [
+        {
+          "category": "週替わりパスタA",
+          "items": [
+            "鶏肉とキャベツのクリーム"
+          ],
+          "status": null,
+          "notes": [],
+          "kcal": 735,
+          "allergens": [
+            "乳",
+            "小麦"
+          ]
+        },
+        {
+          "category": "週替わりパスタB",
+          "items": [],
+          "status": null,
+          "notes": [],
+          "kcal": null,
+          "allergens": []
+        },
+        {
+          "category": "週替わりパスタ夏季",
+          "items": [],
+          "status": null,
+          "notes": [],
+          "kcal": null,
+          "allergens": []
+        }
+      ],
+      "stale": false
     }
   ]
 }

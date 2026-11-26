@@ -1,82 +1,76 @@
+"""学食献立の取得・構造化・通知スクリプト。
+
+処理の流れ
+  1. 献立画像を取得し SHA-256 を計算
+  2. 罫線からメニューセルを検出（menu_grid.detect_grid）
+  3. 画像が前回と同じで、前回 Gemini 解析に成功していれば → キャッシュをそのまま使う
+     （献立表は週1回しか変わらないので、Gemini 呼び出しは実質週1回）
+  4. 新しい画像なら画像全体を Gemini に渡し「1週間分」を構造化 JSON で取得
+  5. Gemini が使えないときはセル単位のローカル OCR ＋ 料理名辞書補正にフォールバック
+  6. menu.json を書き出し、Discord に今日の分を通知
+
+ローカル検証:
+  python fetch_menu.py --local-dir ./samples --date 2026-11-26 --no-discord --discord-preview preview.json
+"""
+from __future__ import annotations
+
+import argparse
+import difflib
 import hashlib
 import io
 import json
 import os
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
-import numpy as np
 import requests
-from google import genai
-from google.genai import types
-from PIL import Image, ImageOps
-from rapidocr_onnxruntime import RapidOCR
+from PIL import Image
 
+from menu_grid import DAY_KEYS, Cell, MenuGrid, cell_image_for_ocr, detect_grid, stitch_cells
+
+PARSER_VERSION = 3
 PAGE_URL = "https://nitsc.co.jp/cafeteria/"
 CAFETERIAS = [
     {
         "id": "cafeteria1",
         "name": "ダイニングホール",
+        "short": "ダイニング",
         "source_url": f"{PAGE_URL}#cafeteria1",
         "image_url": "https://nitsc.co.jp/userdata/1menu.png",
+        "local_name": "1menu.png",
+        "color": 0x0F766E,
         "categories": ["スペシャルランチ", "日替わりランチ", "日工大ランチ"],
+        "extra_categories": [],
     },
     {
         "id": "cafeteria2",
         "name": "キッチン＆カフェトレビ",
+        "short": "トレビ",
         "source_url": f"{PAGE_URL}#cafeteria2",
         "image_url": "https://nitsc.co.jp/userdata/2menu.png",
-        "categories": [],
+        "local_name": "2menu.png",
+        "color": 0x2563EB,
+        "categories": ["日替わりランチ（並）", "鉄板ランチ"],
+        "extra_categories": ["週替わりパスタA", "週替わりパスタB", "週替わりパスタ夏季"],
     },
 ]
 
-# 曜日ごとの横方向クロップ比率（x_start, x_end）
-DAY_X_RATIOS = {
-    "月": (0.14, 0.30),
-    "火": (0.29, 0.45),
-    "水": (0.44, 0.60),
-    "木": (0.59, 0.75),
-    "金": (0.74, 0.90),
-    "土": (0.88, 1.00),
-}
-Y_RATIO = (0.15, 0.96)
-
-# ローカルOCRのよくある誤読補正辞書（創英角ポップ体対策）
-REPLACE_MAP = {
-    "加以重": "カツ重",
-    "黒胡椒加弓": "黒胡椒からあげ",
-    "温宝": "温玉",
-    "琉球木一": "琉球ポーク",
-    "甘亏夕": "サラダ",
-    "三二小么": "ミニオムレツ",
-    "人定食": "おでん定食",
-    "力口[kcal]": "",
-    "力ロー[kcal]": "",
-    "蛋白質[g]": "",
-    "蛋白[g]": "",
-    "脂質[g]": "",
-    "塩分[g]": "",
-}
-
-NOISE_EXACT = {
-    "アレルゲン",
-    "カロリー",
-    "蛋白質",
-    "脂質",
-    "塩分",
-    "垣分",
-    "kcal",
-    "g",
-    "分",
-    "幼千",
-    "乳小麦",
-    "用乳小",
-    "図乳小",
-}
-
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# 公開ページ（GitHub Pages 等）のURL。設定すると通知にリンクが付く
+SITE_URL = os.environ.get("SITE_URL", "").strip()
+# 先頭から順に試す。404（廃止）は即座に次へ、503/429 のみ1回だけ短く再試行
+GEMINI_MODELS = [
+    m.strip()
+    for m in (
+        os.environ.get("GEMINI_MODELS") or "gemini-flash-latest,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-2.5-flash"
+    ).split(",")
+    if m.strip()
+]
+GEMINI_TIMEOUT_MS = int(os.environ.get("GEMINI_TIMEOUT_MS") or "60000")
+# "fallback"（既定）: OCRフォールバック時のみ原本の欄を添付 / "always" / "never"
+DISCORD_ATTACH = os.environ.get("DISCORD_ATTACH_IMAGE") or "fallback"
 
 JST = timezone(timedelta(hours=+9), "JST")
 WEEKDAY_MAP = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日"}
@@ -86,338 +80,629 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     )
 }
+DISHES_PATH = "dishes.json"
+MENU_PATH = "menu.json"
+
+STATUS_RE = re.compile(r"^(休売|休止|休み|休業|定休日?|販売なし)$")
+NOTE_RE = re.compile(r"(致します|いたします|より販売|出来ません|できません|ございます|ください|下さい|予定)")
 
 
-def load_previous_cache(path: str = "menu.json") -> dict:
-    """前回のmenu.jsonから食堂IDごとのキャッシュを読み込む"""
-    if not os.path.exists(path):
-        return {}
+# ---------------------------------------------------------------------------
+# 共通: セクションの正規化
+# ---------------------------------------------------------------------------
+def empty_section(category: str) -> dict:
+    return {"category": category, "items": [], "status": None, "notes": [], "kcal": None, "allergens": []}
+
+
+def normalize_section(sec: dict, category: str) -> dict:
+    out = empty_section(category)
+    items = [re.sub(r"\s+", " ", str(i)).strip() for i in (sec.get("items") or []) if str(i).strip()]
+    notes = [str(n).strip() for n in (sec.get("notes") or []) if str(n).strip()]
+    status = (sec.get("status") or "").strip() or None
+
+    kept = []
+    for it in items:
+        if STATUS_RE.match(it):
+            status = status or it
+        elif NOTE_RE.search(it):
+            notes.append(it)
+        else:
+            kept.append(it)
+    out["items"] = kept
+    out["notes"] = notes
+    out["status"] = status if not kept else None
+
+    kcal = sec.get("kcal")
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        kcal = int(str(kcal).replace(",", "")) if kcal not in (None, "", 0) else None
+    except ValueError:
+        kcal = None
+    out["kcal"] = kcal if kcal and 100 <= kcal <= 3000 else None
+    out["allergens"] = [str(a).strip() for a in (sec.get("allergens") or []) if str(a).strip()]
+    return out
+
+
+def norm_date(s: str) -> str:
+    m = re.search(r"(\d{1,2})\s*[/月]\s*(\d{1,2})", s or "")
+    return f"{int(m.group(1))}/{int(m.group(2))}" if m else ""
+
+
+def week_dates(today: date) -> dict[str, str]:
+    monday = today - timedelta(days=today.weekday())
+    return {k: f"{(monday + timedelta(days=i)).month}/{(monday + timedelta(days=i)).day}" for i, k in enumerate(DAY_KEYS)}
+
+
+# ---------------------------------------------------------------------------
+# Gemini: 画像全体 → 1週間分の構造化
+# ---------------------------------------------------------------------------
+def build_gemini_prompt(caf: dict) -> str:
+    cats = "、".join(caf["categories"])
+    extra = (
+        f"\n- 表の下に曜日と無関係の枠（{'、'.join(caf['extra_categories'])}）がある。これは \"weekly\" に入れる。"
+        if caf["extra_categories"]
+        else "\n- \"weekly\" は空配列にする。"
+    )
+    return f"""これは大学食堂「{caf['name']}」の1週間分の献立表（フォントは創英角ポップ体）です。
+表を正確に読み取り、指定のJSONだけを出力してください。
+
+表の構造:
+- 列: 月〜土の6日分。最上段に「11月23日(月)」のような日付がある。
+- 行（区分）: 上から {cats}。左端に縦書きで区分名がある。{extra}
+- 各欄は「料理名（太字）」→「アレルゲン：（赤字）」→「カロリー・蛋白質・脂質・塩分」の順。
+
+出力ルール:
+- days は月〜土の6要素。key は "月"〜"土"、date は "11/26" の形式。
+- sections は区分ごと（上記の順）。category は上記の区分名をそのまま使う。
+- items: 料理を1品ずつ。主菜を先頭、副菜（温玉・サラダ等）を後ろに。
+  改行で折り返されているだけの料理名は1品につなげる（例: 「ジャンダレチキン」「ステーキ」→「ジャンダレチキンステーキ」、「極太つけ麺」「魚介とんこつ（麺400g）」→「極太つけ麺 魚介とんこつ（麺400g）」）。
+  「＆パスタ」「＆ポテト」のような付け合わせは直前の料理名に含める。
+- status: 「休売」「休止」「休み」などと書かれている欄はその語を入れ、items は空配列。
+- notes: 「11時半より販売致します」「大盛は出来ません」のような注意書きは items でなく notes へ。
+- kcal: カロリー欄の整数（空欄なら null）。allergens: 赤字のアレルゲン（例 ["卵","乳","小麦"]、無ければ []）。
+- 欄が完全に空白なら items=[], status=null。
+- 読めない文字を推測で埋めない。漢字・カタカナは日本語の表記で（簡体字にしない）。
+"""
+
+
+_SECTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "category": {"type": "string"},
+        "items": {"type": "array", "items": {"type": "string"}},
+        "status": {"type": "string", "description": "休売・休止・休み など。無ければ空文字"},
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "kcal": {"type": "integer", "description": "空欄なら 0"},
+        "allergens": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["category", "items", "status", "notes", "kcal", "allergens"],
+}
+GEMINI_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "days": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "enum": DAY_KEYS},
+                    "date": {"type": "string"},
+                    "sections": {"type": "array", "items": _SECTION_SCHEMA},
+                },
+                "required": ["key", "date", "sections"],
+            },
+        },
+        "weekly": {"type": "array", "items": _SECTION_SCHEMA},
+    },
+    "required": ["days", "weekly"],
+}
+
+
+def parse_with_gemini(caf: dict, img_bytes: bytes) -> tuple[dict | None, str]:
+    """成功時 (parsed_dict, model_name)、失敗時 (None, 理由)"""
+    if not GEMINI_API_KEY:
+        return None, "GEMINI_API_KEY 未設定"
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError as exc:
+        return None, f"google-genai 未インストール: {exc}"
+
+    client = genai.Client(api_key=GEMINI_API_KEY, http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS))
+    parts = [types.Part.from_bytes(data=img_bytes, mime_type="image/png"), build_gemini_prompt(caf)]
+    configs = []
+    try:  # 構造化出力（JSONスキーマ）対応SDKなら使う
+        configs.append(types.GenerateContentConfig(response_mime_type="application/json", response_json_schema=GEMINI_SCHEMA))
+    except Exception:
+        pass
+    configs.append(types.GenerateContentConfig(response_mime_type="application/json"))
+
+    reasons = []
+    for model in GEMINI_MODELS:
+        cfg_i, attempt = 0, 0
+        while cfg_i < len(configs):
+            t0 = time.time()
+            try:
+                resp = client.models.generate_content(model=model, contents=parts, config=configs[cfg_i])
+                data = json.loads(resp.text)
+                if not isinstance(data, dict) or not isinstance(data.get("days"), list) or not data["days"]:
+                    raise ValueError("JSONに days がありません")
+                print(f"[INFO] Gemini成功 {caf['name']} model={model} ({time.time() - t0:.1f}s)")
+                return data, model
+            except Exception as exc:
+                msg = str(exc)
+                short = msg.splitlines()[0][:160] if msg else type(exc).__name__
+                print(f"[WARN] Gemini失敗 model={model}: {short}")
+                transient = any(k in msg for k in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "timed out", "Timeout"))
+                if transient and attempt == 0:
+                    attempt += 1
+                    time.sleep(2)
+                    continue
+                if ("400" in msg or "INVALID_ARGUMENT" in msg or isinstance(exc, ValueError)) and cfg_i + 1 < len(configs):
+                    cfg_i += 1  # スキーマ非対応などはスキーマ無しで1回だけ再試行
+                    continue
+                reasons.append(f"{model}: {short}")
+                break  # 404（廃止・存在しない）などは即座に次のモデルへ
+    return None, " / ".join(reasons)
+
+
+def assemble_from_gemini(caf: dict, data: dict, grid: MenuGrid, today: date) -> dict:
+    fallback_dates = week_dates(today)
+    by_key = {str(d.get("key")): d for d in data.get("days", []) if isinstance(d, dict)}
+    days = []
+    for ri_day, key in enumerate(DAY_KEYS):
+        src = by_key.get(key, {})
+        src_secs = [s for s in (src.get("sections") or []) if isinstance(s, dict)]
+        secs = []
+        for ri, cat in enumerate(caf["categories"]):
+            match = next((s for s in src_secs if str(s.get("category", "")).strip() == cat), None)
+            if match is None and ri < len(src_secs):
+                match = src_secs[ri]
+            sec = normalize_section(match or {}, cat)
+            # 罫線検出で「完全な空欄」と分かっている欄は、AIの出力より優先して空にする（幻覚対策）
+            if grid.ok and ri < len(grid.rows) and grid.rows[ri][key].is_blank:
+                sec = empty_section(cat)
+            secs.append(sec)
+        date_str = norm_date(str(src.get("date") or "")) or fallback_dates[key]
+        days.append({"key": key, "date": date_str, "sections": secs})
+
+    weekly_src = [s for s in (data.get("weekly") or []) if isinstance(s, dict)]
+    weekly = []
+    for i, cat in enumerate(caf["extra_categories"]):
+        match = next((s for s in weekly_src if str(s.get("category", "")).strip() == cat), None)
+        if match is None and i < len(weekly_src):
+            match = weekly_src[i]
+        sec = normalize_section(match or {}, cat)
+        if i < len(grid.extras) and grid.extras[i].is_blank:
+            sec = empty_section(cat)
+        weekly.append(sec)
+    return {"days": days, "weekly": weekly}
+
+
+# ---------------------------------------------------------------------------
+# ローカルOCR（フォールバック）
+# ---------------------------------------------------------------------------
+# 簡体字モデル由来の字形を日本語に戻す（文脈に依らず安全なものだけ）
+SIMPLIFIED_TO_JA = str.maketrans({
+    "黑": "黒", "贩": "販", "壳": "売", "卖": "売", "调": "週", "鸡": "鶏", "鱼": "魚", "烧": "焼",
+    "风": "風", "盐": "塩", "汤": "湯", "饺": "餃", "杂": "雑", "酱": "醤", "肠": "腸", "猪": "豚",
+    "饭": "飯", "锅": "鍋", "铁": "鉄", "边": "辺", "时": "時", "图": "図",
+})
+REPLACE_MAP = {
+    "加以重": "カツ重", "黒胡椒加弓": "黒胡椒からあげ", "琉球木一": "琉球ポーク", "人定食": "おでん定食", "温宝": "温玉", "甘亏夕": "サラダ", "廿亏夕": "サラダ", "三二小么": "ミニオムレツ",
+}
+
+
+class LocalOCR:
+    """rapidocr(v3, PP-OCRv5: 日本語対応) を優先し、無ければ旧 rapidocr_onnxruntime を使う"""
+
+    def __init__(self) -> None:
+        self.engine = None
+        self.kind = "none"
+        try:
+            from rapidocr import RapidOCR  # type: ignore
+
+            try:
+                from rapidocr import LangRec  # type: ignore
+                from rapidocr.utils.typings import OCRVersion  # type: ignore
+
+                self.engine = RapidOCR(params={
+                    "Det.ocr_version": OCRVersion.PPOCRV5,
+                    "Rec.ocr_version": OCRVersion.PPOCRV5,
+                    "Rec.lang_type": LangRec.CH,  # PP-OCRv5 の ch モデルは日本語も学習済み
+                })
+                self.kind = "rapidocr-ppocrv5"
+            except Exception as exc:
+                print(f"[WARN] PP-OCRv5 初期化失敗、既定モデルを使用: {exc}")
+                self.engine = RapidOCR()
+                self.kind = "rapidocr-default"
+        except ImportError:
+            try:
+                from rapidocr_onnxruntime import RapidOCR  # type: ignore
+
+                self.engine = RapidOCR()
+                self.kind = "rapidocr_onnxruntime"
+            except ImportError:
+                print("[WARN] OCRエンジンが見つかりません")
+        print(f"[INFO] OCRエンジン: {self.kind}")
+
+    def read_lines(self, img: Image.Image) -> list[tuple[float, float, float, str, float]]:
+        """(x0, y_center, x1, text, score) のリスト"""
+        if self.engine is None:
+            return []
+        import numpy as np
+
+        arr = np.array(img.convert("RGB"))
+        res = self.engine(arr)
+        out = []
+        if hasattr(res, "txts"):  # rapidocr v2/v3
+            boxes, txts, scores = res.boxes, res.txts, res.scores
+            if boxes is None or txts is None:
+                return []
+            triples = zip(boxes, txts, scores)
+        else:  # rapidocr_onnxruntime: (result, elapse)
+            result = res[0] if isinstance(res, tuple) else res
+            triples = ((r[0], r[1], r[2]) for r in (result or []))
+        for box, txt, score in triples:
+            xs = [p[0] for p in box]
+            ys = [p[1] for p in box]
+            out.append((min(xs), sum(ys) / len(ys), max(xs), str(txt).strip(), float(score)))
+        return out
+
+
+def join_wrapped_lines(lines: list[tuple[float, float, float, str, float]], cell_w: float) -> list[str]:
+    """字下げされた行を前行の続きとみなして連結する（「ジャンダレチキン / 　ステーキ」→1品）"""
+    lines = [l for l in lines if l[3] and l[4] >= 0.45]
+    if not lines:
+        return []
+    lines.sort(key=lambda l: l[1])
+    left = min(l[0] for l in lines)
+    items: list[str] = []
+    for x0, _yc, _x1, txt, _s in lines:
+        indented = (x0 - left) > cell_w * 0.06
+        if items and (indented or txt[:1] in "（(＆&"):
+            items[-1] += txt
+        else:
+            items.append(txt)
+    return items
+
+
+def clean_ocr_text(s: str) -> str:
+    s = s.translate(SIMPLIFIED_TO_JA)
+    for bad, good in REPLACE_MAP.items():
+        s = s.replace(bad, good)
+    s = s.replace("(", "（").replace(")", "）").replace("&", "＆")
+    return s.strip(" 　・.,")
+
+
+def load_dish_dictionary() -> list[str]:
+    try:
+        with open(DISHES_PATH, encoding="utf-8") as f:
+            return list(json.load(f).get("dishes", []))
+    except Exception:
+        return []
+
+
+def save_dish_dictionary(names: list[str]) -> None:
+    current = load_dish_dictionary()
+    merged = sorted(set(current) | {n for n in names if 2 <= len(n) <= 40})
+    if merged != sorted(current):
+        with open(DISHES_PATH, "w", encoding="utf-8") as f:
+            json.dump({"dishes": merged}, f, ensure_ascii=False, indent=2)
+        print(f"[INFO] 料理名辞書を更新: {len(current)} → {len(merged)} 件")
+
+
+def correct_with_dictionary(s: str, dictionary: list[str]) -> str:
+    """過去にGeminiで正しく読めた料理名と似ていれば、そちらに寄せる"""
+    if not dictionary or len(s) < 2:
+        return s
+    best, best_r = s, 0.0
+    for cand in dictionary:
+        if abs(len(cand) - len(s)) > max(3, len(cand) // 2):
+            continue
+        r = difflib.SequenceMatcher(None, s, cand).ratio()
+        if r > best_r:
+            best, best_r = cand, r
+    return best if best_r >= 0.62 else s
+
+
+def ocr_cell(ocr: LocalOCR, img: Image.Image, cell: Cell, category: str, dictionary: list[str]) -> dict:
+    if cell.is_blank:
+        return empty_section(category)
+    pre = cell_image_for_ocr(img, cell)
+    lines = ocr.read_lines(pre)
+    raw_items = join_wrapped_lines(lines, pre.width)
+    items = []
+    for t in raw_items:
+        t = clean_ocr_text(t)
+        if not t or re.fullmatch(r"[\W\d_a-zA-Z]{1,2}", t):
+            continue
+        items.append(correct_with_dictionary(t, dictionary))
+    return normalize_section({"items": items}, category)
+
+
+def ocr_header_dates(ocr: LocalOCR, img: Image.Image, grid: MenuGrid) -> dict[str, str]:
+    """表の最上段（日付行）をOCRして '11/26' 形式に"""
+    out: dict[str, str] = {}
+    if not grid.ok:
+        return out
+    h = grid.height
+    for key, cell in grid.rows[0].items():
+        box = (cell.x0, max(0, cell.y0 - int(h * 0.034)), cell.x1, cell.y0 - 2)
+        crop = img.crop(box).convert("L")
+        crop = crop.resize((crop.width * 3, crop.height * 3), Image.Resampling.LANCZOS)
+        text = "".join(l[3] for l in ocr.read_lines(crop))
+        m = re.search(r"(\d{1,2})\s*月\s*(\d{1,2})\s*日", text)
+        if m:
+            out[key] = f"{int(m.group(1))}/{int(m.group(2))}"
+    return out
+
+
+def parse_with_local_ocr(caf: dict, img: Image.Image, grid: MenuGrid, ocr: LocalOCR, today: date) -> dict:
+    dictionary = load_dish_dictionary()
+    dates = {**week_dates(today), **ocr_header_dates(ocr, img, grid)}
+    days = []
+    for key in DAY_KEYS:
+        secs = []
+        for ri, cat in enumerate(caf["categories"]):
+            if ri < len(grid.rows):
+                secs.append(ocr_cell(ocr, img, grid.rows[ri][key], cat, dictionary))
+            else:
+                secs.append(empty_section(cat))
+        days.append({"key": key, "date": dates[key], "sections": secs})
+    weekly = [
+        ocr_cell(ocr, img, grid.extras[i], cat, dictionary) if i < len(grid.extras) else empty_section(cat)
+        for i, cat in enumerate(caf["extra_categories"])
+    ]
+    return {"days": days, "weekly": weekly}
+
+
+# ---------------------------------------------------------------------------
+# 取得・キャッシュ
+# ---------------------------------------------------------------------------
+def load_previous(path: str = MENU_PATH) -> dict:
+    try:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        cache = {}
-        for caf in data.get("cafeterias", []):
-            cid = caf.get("id")
-            if cid:
-                cache[cid] = caf
-        return cache
+        return {c["id"]: c for c in data.get("cafeterias", []) if c.get("id")}
     except Exception:
         return {}
 
 
-def prepare_day_crop_bytes(img_bytes: bytes, day_key: str) -> bytes:
-    """元画像から今日の曜日列を切り抜き、OCR向けに前処理したPNGバイト列を返す"""
-    with Image.open(io.BytesIO(img_bytes)) as im:
-        im.load()
-        w, h = im.size
-        x0_r, x1_r = DAY_X_RATIOS.get(day_key, (0.14, 0.95))
-        y0_r, y1_r = Y_RATIO
-
-        box = (
-            max(0, int(w * x0_r)),
-            max(0, int(h * y0_r)),
-            min(w, int(w * x1_r)),
-            min(h, int(h * y1_r)),
-        )
-        cropped = im.crop(box)
-        enlarged = cropped.resize(
-            (cropped.width * 2, cropped.height * 2),
-            Image.Resampling.LANCZOS,
-        )
-        gray = ImageOps.grayscale(enlarged)
-        enhanced = ImageOps.autocontrast(gray)
-
-        out = io.BytesIO()
-        enhanced.save(out, format="PNG")
-        return out.getvalue()
+def get_image_bytes(caf: dict, local_dir: str | None) -> bytes:
+    if local_dir:
+        with open(os.path.join(local_dir, caf["local_name"]), "rb") as f:
+            return f.read()
+    r = requests.get(caf["image_url"], headers=HEADERS, timeout=15)
+    r.raise_for_status()
+    return r.content
 
 
-def clean_ocr_lines(raw_lines: list[str]) -> list[str]:
-    """OCRの行リストから数値・栄養表記・アレルゲン系ノイズを削り、よく出る誤字を補正する"""
-    cleaned: list[str] = []
-    for line in raw_lines:
-        s = line.strip()
-        if not s:
-            continue
-
-        for bad, good in REPLACE_MAP.items():
-            s = s.replace(bad, good).strip()
-
-        if not s or s in NOISE_EXACT:
-            continue
-
-        if any(k in s for k in ["kcal", "蛋白質", "蛋白[", "脂質", "塩分", "アレルゲン", "乳小"]):
-            continue
-
-        if re.fullmatch(r"[\[\]().\-+0-9,.\s]+g?", s):
-            continue
-        if len(s) == 1 and re.fullmatch(r"[A-Za-z0-9\-/]", s):
-            continue
-        if s in {"[", "]", "(", ")", "[g]", "g]"}:
-            continue
-
-        cleaned.append(s)
-    return cleaned
-
-
-def run_local_ocr(ocr_engine: RapidOCR, caf_name: str, crop_png_bytes: bytes, today_key: str) -> list[str]:
-    """ローカルOCRで切り抜き画像から今日のメニュー行を抽出する"""
-    try:
-        with Image.open(io.BytesIO(crop_png_bytes)) as im:
-            arr = np.array(im)
-        result, _ = ocr_engine(arr)
-        if not result:
-            return []
-        raw_lines = [
-            str(item[1]).strip()
-            for item in result
-            if item and len(item) >= 2 and str(item[1]).strip()
-        ]
-        items = clean_ocr_lines(raw_lines)
-        print(f"[INFO] ローカルOCR {caf_name} ({today_key}曜) 抽出件数: {len(items)}")
-        return items
-    except Exception as exc:
-        print(f"[WARN] ローカルOCR失敗 ({caf_name}): {exc}")
-        return []
-
-
-def format_menu_with_gemini(
-    caf: dict,
-    crop_png_bytes: bytes,
-    ocr_lines: list[str],
-    today_key: str,
-) -> list[dict]:
-    """切り抜き画像＋OCR下書きテキストをGeminiに渡し、誤字補正と区分ごとの構造化を行う（短時間打ち切り）"""
-    if not GEMINI_API_KEY:
-        return []
-
-    caf_name = caf["name"]
-    categories = caf.get("categories") or []
-    cat_hint = (
-        f"想定されるメニュー区分（上から順）: {', '.join(categories)}"
-        if categories
-        else "区分見出しがあれば区分ごとに、無ければ「本日のメニュー」という1グループにまとめてください。"
-    )
-    ocr_hint = "\n".join(f"- {x}" for x in ocr_lines[:20]) if ocr_lines else "(なし)"
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    prompt = f"""
-あなたは大学の学食献立表を見やすく整理するアシスタントです。
-対象食堂: {caf_name}（{today_key}曜日）
-{cat_hint}
-
-添付画像は献立表（創英角ポップ体）から{today_key}曜日の列を切り抜いたものです。
-参考としてローカルOCRの抽出結果も載せますが、POP体特有の誤字や改行の分断が含まれています。
-画像そのものを見て正しい日本語の料理名に補正し、見やすいグループ形式でJSON出力してください。
-
-ルール:
-- カロリー・蛋白質・脂質・塩分・アレルゲン表記（卵・乳・小麦など）は除外する
-- 1つの定食・セット内の主菜と副菜は「／」でつなぐか、わかりやすい単位にまとめる（例: 「桐生ソースカツ重／温玉／サラダ」）
-- 「休売」「休業」などの記載がある場合はそのまま簡潔に入れる
-- 余計な説明文は書かず、以下のJSON形式のみを出力する
-
-{{
-  "sections": [
-    {{
-      "category": "スペシャルランチ",
-      "items": ["桐生ソースカツ重／温玉／サラダ"]
-    }}
-  ]
-}}
-
-参考OCRテキスト:
-{ocr_hint}
-"""
-
-    parts = [
-        types.Part.from_bytes(data=crop_png_bytes, mime_type="image/png"),
-        prompt,
-    ]
-
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
-    last_exc = None
-
-    for model_name in models_to_try:
-        for attempt in range(2):
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=parts,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.1,
-                    ),
-                )
-                parsed = json.loads(response.text)
-                sections = parsed.get("sections") if isinstance(parsed, dict) else []
-                if not isinstance(sections, list):
-                    sections = []
-
-                normalized: list[dict] = []
-                for sec in sections:
-                    if not isinstance(sec, dict):
-                        continue
-                    cat = str(sec.get("category", "")).strip() or "本日のメニュー"
-                    raw_items = sec.get("items", [])
-                    if not isinstance(raw_items, list):
-                        continue
-                    clean_items = [str(i).strip() for i in raw_items if str(i).strip()]
-                    if clean_items:
-                        normalized.append({"category": cat, "items": clean_items})
-
-                if normalized:
-                    print(f"[INFO] Gemini整形成功 {caf_name} ({today_key}曜) [model={model_name}]")
-                    return normalized
-            except Exception as exc:
-                last_exc = exc
-                msg = str(exc)
-                is_transient = ("503" in msg) or ("UNAVAILABLE" in msg) or ("429" in msg)
-                if is_transient and attempt < 1:
-                    time.sleep(1.5)
-                    continue
-                break
-
-    print(f"[WARN] Gemini整形スキップ ({caf_name}): {last_exc}")
-    return []
-
-
-def fetch_all_cafeterias(today_key: str) -> list[dict]:
-    """各食堂の献立画像を取得し、ローカルOCR＋Gemini整形で構造化データを生成する"""
-    results: list[dict] = []
-    ocr_engine = RapidOCR()
-    prev_cache = load_previous_cache()
-
-    for base in CAFETERIAS:
-        cid = base["id"]
-        img_url = base["image_url"]
-        sections: list[dict] = []
-        fallback_items: list[str] = []
-        source_method = "none"
-        img_hash = ""
-
-        try:
-            r = requests.get(img_url, headers=HEADERS, timeout=15)
-            r.raise_for_status()
-            img_bytes = r.content
-            img_hash = hashlib.sha256(img_bytes).hexdigest()
-
-            cached = prev_cache.get(cid) or {}
-            cached_parsed = cached.get("menu_parsed") or {}
-            if (
-                cached.get("image_hash") == img_hash
-                and cached_parsed.get("today_label") == today_key
-                and cached_parsed.get("method") == "ocr_plus_gemini"
-                and cached_parsed.get("sections")
-            ):
-                print(f"[INFO] キャッシュ再利用 {base['name']} ({today_key}曜)")
-                sections = cached_parsed["sections"]
-                source_method = "ocr_plus_gemini"
-            else:
-                crop_bytes = prepare_day_crop_bytes(img_bytes, today_key)
-                ocr_lines = run_local_ocr(ocr_engine, base["name"], crop_bytes, today_key)
-
-                formatted_sections = format_menu_with_gemini(base, crop_bytes, ocr_lines, today_key)
-                if formatted_sections:
-                    sections = formatted_sections
-                    source_method = "ocr_plus_gemini"
-                elif ocr_lines:
-                    fallback_items = ocr_lines
-                    sections = [{"category": "抽出メニュー（簡易OCR）", "items": ocr_lines}]
-                    source_method = "local_ocr_only"
-
-        except Exception as exc:
-            print(f"[WARN] 画像取得失敗 ({base['name']} / {img_url}): {exc}")
-
-        results.append({
-            "id": cid,
-            "name": base["name"],
-            "source_url": base["source_url"],
-            "image_url": img_url,
-            "image_hash": img_hash,
-            "menu_parsed": {
-                "today_label": today_key,
-                "sections": sections,
-                "fallback_items": fallback_items,
-                "method": source_method,
-            },
-        })
-
-    return results
-
-
-def build_discord_embed(caf: dict, updated_at: str, today_str: str) -> dict:
-    """各食堂のDiscord Embedオブジェクトを視認性高く組み立てる"""
-    parsed = caf.get("menu_parsed") or {}
-    sections = parsed.get("sections") or []
-    img_url = caf.get("image_url", "")
-
-    embed = {
-        "title": f"🍽️ {today_str} {caf['name']}",
-        "url": img_url or caf["source_url"],
-        "color": 0x0F766E if caf["id"] == "cafeteria1" else 0x2563EB,
-        "fields": [],
-        "footer": {"text": f"最終更新: {updated_at} ｜ タイトルクリックで献立画像を表示"},
+def process_cafeteria(caf: dict, today: date, prev: dict, ocr_holder: dict, local_dir: str | None) -> tuple[dict, bytes]:
+    """(menu.json用の食堂データ, 今日の欄の原本画像PNG) を返す"""
+    result = {
+        "id": caf["id"],
+        "name": caf["name"],
+        "short": caf["short"],
+        "source_url": caf["source_url"],
+        "image_url": caf["image_url"],
+        "image_hash": "",
+        "method": "none",
+        "model": None,
+        "parser_version": PARSER_VERSION,
+        "parsed_at": None,
+        "error": None,
+        "days": [],
+        "weekly": [],
     }
+    try:
+        img_bytes = get_image_bytes(caf, local_dir)
+    except Exception as exc:
+        result["error"] = f"画像取得失敗: {exc}"
+        print(f"[WARN] {result['error']}")
+        return result, b""
 
-    if not sections:
-        embed["description"] = "本日の献立を抽出できませんでした（休止日または画像未更新の可能性があります）。"
-        return embed
+    img_hash = hashlib.sha256(img_bytes).hexdigest()
+    result["image_hash"] = img_hash
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    grid = detect_grid(img)
+    print(f"[INFO] {caf['name']}: 区分行 {len(grid.rows)} / 追加枠 {len(grid.extras)} を検出")
 
-    for sec in sections:
-        cat = sec.get("category", "メニュー")
-        items = sec.get("items", [])
-        if not items:
-            continue
-        value_lines = [f"・{item}" for item in items]
-        value_text = "\n".join(value_lines)
-        embed["fields"].append({
-            "name": f"▸ {cat}"[:250],
-            "value": value_text[:1000],
-            "inline": False,
-        })
+    today_key = WEEKDAY_MAP[today.weekday()]
+    today_cells: list[Cell] = []
+    if today_key in DAY_KEYS:
+        today_cells = [r[today_key] for r in grid.rows] + list(grid.extras[: len(caf["extra_categories"])])
+    crop_png = stitch_cells(img, today_cells) if today_cells else b""
 
-    return embed
-
-
-def send_discord(data: dict) -> None:
-    """Discord Webhookへ献立Embedを送信する"""
-    if not DISCORD_WEBHOOK_URL:
-        print("[INFO] DISCORD_WEBHOOK_URL 未設定のため通知をスキップします。")
-        return
-
-    now_jst = datetime.now(JST)
-    today_str = f"{now_jst.strftime('%m/%d')} ({WEEKDAY_MAP[now_jst.weekday()]})"
-    embeds = [
-        build_discord_embed(caf, data["updated_at"], today_str)
-        for caf in data.get("cafeterias", [])
-    ]
-
-    res = requests.post(
-        DISCORD_WEBHOOK_URL,
-        json={"embeds": embeds[:10]},
-        timeout=15,
+    cached = prev.get(caf["id"]) or {}
+    same_image = (
+        cached.get("image_hash") == img_hash
+        and cached.get("parser_version") == PARSER_VERSION
+        and not os.environ.get("FORCE_REPARSE")
     )
+    if same_image and cached.get("method") == "gemini" and cached.get("days"):
+        print(f"[INFO] キャッシュ再利用 {caf['name']}（Gemini解析済み・画像変更なし）")
+        for k in ("method", "model", "parsed_at", "days", "weekly"):
+            result[k] = cached.get(k)
+        return result, crop_png
+
+    data, info = parse_with_gemini(caf, img_bytes)
+    if data:
+        parsed = assemble_from_gemini(caf, data, grid, today)
+        result.update(method="gemini", model=info)
+        save_dish_dictionary([i for d in parsed["days"] for s in d["sections"] for i in s["items"]]
+                             + [i for s in parsed["weekly"] for i in s["items"]])
+    else:
+        result["error"] = f"Gemini不可: {info}"
+        if same_image and cached.get("method") == "local_ocr" and cached.get("days"):
+            print(f"[INFO] ローカルOCR結果のキャッシュを再利用 {caf['name']}")
+            for k in ("method", "parsed_at", "days", "weekly"):
+                result[k] = cached.get(k)
+            return result, crop_png
+        if "ocr" not in ocr_holder:
+            ocr_holder["ocr"] = LocalOCR()
+        parsed = parse_with_local_ocr(caf, img, grid, ocr_holder["ocr"], today)
+        result["method"] = "local_ocr" if ocr_holder["ocr"].engine else "none"
+    result["days"] = parsed["days"]
+    result["weekly"] = parsed["weekly"]
+    result["parsed_at"] = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+    return result, crop_png
+
+
+# ---------------------------------------------------------------------------
+# Discord
+# ---------------------------------------------------------------------------
+CATEGORY_EMOJI = [("スペシャル", "⭐"), ("日替", "🍱"), ("日工大", "🎓"), ("鉄板", "🔥"), ("パスタ", "🍝")]
+
+
+def category_emoji(cat: str) -> str:
+    return next((e for k, e in CATEGORY_EMOJI if k in cat), "🍽️")
+
+
+def format_section_value(sec: dict) -> str:
+    if sec["status"]:
+        return f"*本日{sec['status']}*" if not sec["status"].startswith("本日") else f"*{sec['status']}*"
+    lines = []
+    main, *sides = sec["items"]
+    lines.append(f"**{main}**")
+    if sides:
+        lines.append("＋ " + " ・ ".join(sides))
+    for n in sec["notes"]:
+        lines.append(f"📝 {n}")
+    meta = []
+    if sec["kcal"]:
+        meta.append(f"`{sec['kcal']:,} kcal`")
+    if sec["allergens"]:
+        meta.append("⚠️ " + "・".join(sec["allergens"]))
+    if meta:
+        lines.append(" ".join(meta))
+    return "\n".join(lines)[:1024]
+
+
+def today_sections(caf: dict, today_key: str) -> list[dict]:
+    day = next((d for d in caf.get("days") or [] if d["key"] == today_key), None)
+    secs = list(day["sections"]) if day else []
+    secs += caf.get("weekly") or []
+    return [s for s in secs if s["items"] or s["status"]]
+
+
+def build_discord_payload(data: dict, today: date, crops: dict[str, bytes]) -> tuple[dict, list[tuple[str, bytes]]]:
+    today_key = WEEKDAY_MAP[today.weekday()]
+    date_label = f"{today.month}/{today.day}（{today_key}）"
+    embeds, files = [], []
+    for caf in data["cafeterias"]:
+        secs = today_sections(caf, today_key)
+        has_note_only = [s for s in secs if s["notes"] and not s["items"] and not s["status"]]
+        embed = {
+            "title": f"{caf['name']}",
+            "url": caf["image_url"],
+            "color": next((c["color"] for c in CAFETERIAS if c["id"] == caf["id"]), 0x64748B),
+            "fields": [],
+        }
+        desc = [f"**{date_label}** のメニュー"]
+        if caf.get("stale"):
+            desc.append("⚠️ 献立表が今週分に更新されていない可能性があります")
+        embed["description"] = "\n".join(desc)
+
+        serving = [s for s in secs if s["items"]]
+        if not secs:
+            if caf.get("method") == "gemini":
+                embed["description"] += "\n\n本日の提供情報はありません。"
+            else:
+                embed["description"] += "\n\nメニューを読み取れませんでした。下の画像（献立表の今日の欄）をご確認ください。"
+        for sec in secs:
+            if sec in has_note_only:
+                continue
+            embed["fields"].append({
+                "name": f"{category_emoji(sec['category'])} {sec['category']}"[:256],
+                "value": format_section_value(sec),
+                "inline": False,
+            })
+        if secs and not serving:
+            embed["description"] += "\n\n本日はすべて休止です。"
+
+        method = caf.get("method")
+        attach = DISCORD_ATTACH == "always" or (DISCORD_ATTACH == "fallback" and method != "gemini")
+        crop = crops.get(caf["id"])
+        if attach and crop:
+            fname = f"today_{caf['id']}.png"
+            embed["image"] = {"url": f"attachment://{fname}"}
+            files.append((fname, crop))
+        footer = "献立表をAIで読み取り" if method == "gemini" else "⚠️ 簡易OCRのため誤字の可能性あり（下の画像が原本）"
+        embed["footer"] = {"text": f"{footer} ・ タイトルから献立表を開けます"}
+        embeds.append(embed)
+
+    payload: dict = {"embeds": embeds[:10]}
+    if SITE_URL:
+        payload["content"] = f"🗓️ 今週の献立はこちら → <{SITE_URL}>"
+    return payload, files
+
+
+def send_discord(payload: dict, files: list[tuple[str, bytes]]) -> None:
+    if not DISCORD_WEBHOOK_URL:
+        print("[INFO] DISCORD_WEBHOOK_URL 未設定のため通知をスキップ")
+        return
+    if files:
+        multipart = {f"files[{i}]": (name, blob, "image/png") for i, (name, blob) in enumerate(files)}
+        res = requests.post(
+            DISCORD_WEBHOOK_URL, data={"payload_json": json.dumps(payload, ensure_ascii=False)},
+            files=multipart, timeout=20,
+        )
+    else:
+        res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=20)
+    if res.status_code >= 400:
+        print(f"[WARN] Discord送信失敗 {res.status_code}: {res.text[:300]}")
     res.raise_for_status()
-    print("[INFO] Discord Webhook 通知を送信しました。")
+    print("[INFO] Discord 通知を送信しました")
 
 
+# ---------------------------------------------------------------------------
 def main() -> None:
-    now_jst = datetime.now(JST)
-    today_key = WEEKDAY_MAP[now_jst.weekday()]
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--local-dir", help="画像をURLではなくこのフォルダから読む（1menu.png / 2menu.png）")
+    ap.add_argument("--date", help="今日の日付を上書き（YYYY-MM-DD）")
+    ap.add_argument("--no-discord", action="store_true")
+    ap.add_argument("--discord-preview", help="送信内容をJSONファイルに書き出す")
+    ap.add_argument("--save-crops", help="今日の欄の画像を書き出すフォルダ")
+    args = ap.parse_args()
 
-    cafeterias = fetch_all_cafeterias(today_key)
+    now = datetime.now(JST)
+    today = date.fromisoformat(args.date) if args.date else now.date()
+    prev = load_previous()
+    ocr_holder: dict = {}
+
+    cafeterias, crops = [], {}
+    for caf in CAFETERIAS:
+        res, crop = process_cafeteria(caf, today, prev, ocr_holder, args.local_dir)
+        # 今日の日付が献立表の日付に含まれなければ「未更新」の可能性
+        today_label = f"{today.month}/{today.day}"
+        if res["days"] and today.weekday() < 6:
+            res["stale"] = today_label not in {d["date"] for d in res["days"]}
+        cafeterias.append(res)
+        crops[res["id"]] = crop
+        if args.save_crops and crop:
+            os.makedirs(args.save_crops, exist_ok=True)
+            with open(os.path.join(args.save_crops, f"today_{res['id']}.png"), "wb") as f:
+                f.write(crop)
 
     payload = {
-        "updated_at": now_jst.strftime("%Y-%m-%d %H:%M"),
+        "schema_version": 2,
+        "updated_at": now.strftime("%Y-%m-%d %H:%M"),
         "source_url": PAGE_URL,
         "cafeterias": cafeterias,
     }
-
-    with open("menu.json", "w", encoding="utf-8") as f:
+    with open(MENU_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
-    print("[INFO] menu.json を更新しました。")
+    print("[INFO] menu.json を更新しました")
 
-    send_discord(payload)
+    if today.weekday() == 6:
+        print("[INFO] 日曜日のため通知しません")
+        return
+    discord_payload, files = build_discord_payload(payload, today, crops)
+    if args.discord_preview:
+        with open(args.discord_preview, "w", encoding="utf-8") as f:
+            json.dump({"payload": discord_payload, "files": [n for n, _ in files]}, f, ensure_ascii=False, indent=2)
+    if not args.no_discord:
+        send_discord(discord_payload, files)
 
 
 if __name__ == "__main__":
