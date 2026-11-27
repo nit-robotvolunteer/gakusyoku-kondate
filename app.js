@@ -104,12 +104,17 @@ function selectDay(key, push) {
 }
 
 /* ---------- 食券カード ---------- */
+// 縦書きの半券では半角英数字が横倒しになるので全角にする（「週替わりパスタA」→「週替わりパスタＡ」）
+function toFullWidth(text) {
+  return text.replace(/[A-Za-z0-9]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+}
+
 function ticket(sec, cafId) {
   const hits = sec.allergens.filter((a) => state.avoid.has(a));
   const off = Boolean(sec.status);
   const cls = ["ticket", off ? "is-off" : "", hits.length ? "is-avoided" : ""].join(" ").trim();
 
-  const stub = el("div", { class: "ticket-stub", "aria-hidden": "true" }, el("span", { text: sec.category }));
+  const stub = el("div", { class: "ticket-stub", "aria-hidden": "true" }, el("span", { text: toFullWidth(sec.category) }));
 
   const body = el("div", { class: "ticket-body" });
   body.append(el("p", { class: "ticket-cat", text: sec.category }));
@@ -154,7 +159,7 @@ function cafeteriaBlock(caf) {
     "header",
     { class: "caf-head" },
     el("h2", { class: "caf-name", text: caf.name }),
-    el("a", { class: "caf-source", href: caf.image_url, target: "_blank", rel: "noopener", text: "献立表の画像" })
+    el("a", { class: "caf-source", href: caf.image_url, target: "_blank", rel: "noopener", text: "今週の献立" })
   );
 
   const block = el("section", { class: "caf", "data-caf": caf.id, "aria-label": caf.name }, head);
