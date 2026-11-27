@@ -275,6 +275,9 @@ a {
   max-width: 1040px;
   margin: 0 auto;
   padding: 16px 16px 0px;
+  /* 週切り替えで中身が横にスライドしても、ページ幅が画面を超えないようにする。
+     超えると iPhone の Safari がページ全体の倍率を調整し直して画面がガタつく */
+  overflow-x: clip;
 }
 
 .notice {
