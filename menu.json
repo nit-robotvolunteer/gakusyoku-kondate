@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-11-27 14:14",
+  "updated_at": "2026-11-27 14:55",
   "source_url": "https://nitsc.co.jp/cafeteria/",
   "cafeterias": [
     {
@@ -9,12 +9,16 @@
       "short": "ダイニング",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria1",
       "image_url": "https://nitsc.co.jp/userdata/1menu.png",
+      "error": null,
+      "closed_days": [],
+      "week_status": "ok",
+      "stale": false,
+      "week_start": "2026-11-23",
       "image_hash": "a8023a0d8138956b32a33bec630292e45b2ab2a5148d262d8d3caef60ebcd6ab",
       "method": "gemini",
       "model": "gemini-3.5-flash-lite",
       "parser_version": 3,
       "parsed_at": "2026-11-26 21:38",
-      "error": null,
       "days": [
         {
           "key": "月",
@@ -297,225 +301,241 @@
         }
       ],
       "weekly": [],
-      "stale": false
+      "next_week": null
     },
     {
       "id": "cafeteria2",
-      "name": "キッチン＆カフェトレビ",
+      "name": "キッチン＆カフェ トレビ",
       "short": "トレビ",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria2",
       "image_url": "https://nitsc.co.jp/userdata/2menu.png",
-      "image_hash": "50f6190c48c14c74ec06c009103029ec2574e15c4f995bdcd33cc2ca861273f1",
-      "method": "gemini",
-      "model": "gemini-3.5-flash-lite",
-      "parser_version": 3,
-      "parsed_at": "2026-11-27 14:14",
       "error": null,
-      "days": [
-        {
-          "key": "月",
-          "date": "11/30",
-          "sections": [
-            {
-              "category": "日替わりランチ（並）",
-              "items": [
-                "チキングリルマヨマスタードソースプライドポテト＆パスタ"
-              ],
-              "status": null,
-              "notes": [],
-              "kcal": 1086,
-              "allergens": [
-                "卵",
-                "乳",
-                "小麦"
-              ]
-            },
-            {
-              "category": "鉄板ランチ",
-              "items": [],
-              "status": "休止",
-              "notes": [],
-              "kcal": null,
-              "allergens": []
-            }
-          ]
-        },
-        {
-          "key": "火",
-          "date": "12/1",
-          "sections": [
-            {
-              "category": "日替わりランチ（並）",
-              "items": [
-                "イタリアンチーズカツレツオムレツ＆パスタ"
-              ],
-              "status": null,
-              "notes": [],
-              "kcal": 1098,
-              "allergens": [
-                "卵",
-                "乳",
-                "小麦"
-              ]
-            },
-            {
-              "category": "鉄板ランチ",
-              "items": [],
-              "status": "休止",
-              "notes": [],
-              "kcal": null,
-              "allergens": []
-            }
-          ]
-        },
-        {
-          "key": "水",
-          "date": "12/2",
-          "sections": [
-            {
-              "category": "日替わりランチ（並）",
-              "items": [
-                "バジルチキンハーフメンチカツ＆パスタ"
-              ],
-              "status": null,
-              "notes": [],
-              "kcal": 1186,
-              "allergens": [
-                "卵",
-                "乳",
-                "小麦"
-              ]
-            },
-            {
-              "category": "鉄板ランチ",
-              "items": [],
-              "status": "休止",
-              "notes": [],
-              "kcal": null,
-              "allergens": []
-            }
-          ]
-        },
-        {
-          "key": "木",
-          "date": "12/3",
-          "sections": [
-            {
-              "category": "日替わりランチ（並）",
-              "items": [
-                "鶏の竜田揚げヤンニョムソース春雨サラダ"
-              ],
-              "status": null,
-              "notes": [],
-              "kcal": 1027,
-              "allergens": [
-                "卵",
-                "乳",
-                "小麦"
-              ]
-            },
-            {
-              "category": "鉄板ランチ",
-              "items": [
-                "手ごねハンバーグ＆チキンステーキ"
-              ],
-              "status": null,
-              "notes": [
-                "11時半より販売致します",
-                "オムライスの販売は休止致します"
-              ],
-              "kcal": 1218,
-              "allergens": [
-                "卵",
-                "乳",
-                "小麦"
-              ]
-            }
-          ]
-        },
-        {
-          "key": "金",
-          "date": "12/4",
-          "sections": [
-            {
-              "category": "日替わりランチ（並）",
-              "items": [
-                "ポークストロガノフコロッケ"
-              ],
-              "status": null,
-              "notes": [],
-              "kcal": 1087,
-              "allergens": [
-                "卵",
-                "乳",
-                "小麦"
-              ]
-            },
-            {
-              "category": "鉄板ランチ",
-              "items": [],
-              "status": "休止",
-              "notes": [],
-              "kcal": null,
-              "allergens": []
-            }
-          ]
-        },
-        {
-          "key": "土",
-          "date": "12/5",
-          "sections": [
-            {
-              "category": "日替わりランチ（並）",
-              "items": [],
-              "status": "休み",
-              "notes": [],
-              "kcal": null,
-              "allergens": []
-            },
-            {
-              "category": "鉄板ランチ",
-              "items": [],
-              "status": null,
-              "notes": [],
-              "kcal": null,
-              "allergens": []
-            }
-          ]
-        }
+      "closed_days": [
+        "土"
       ],
-      "weekly": [
-        {
-          "category": "週替わりパスタA",
-          "items": [],
-          "status": null,
-          "notes": [],
-          "kcal": null,
-          "allergens": []
-        },
-        {
-          "category": "週替わりパスタB",
-          "items": [
-            "ジェノベーゼ"
-          ],
-          "status": null,
-          "notes": [],
-          "kcal": 752,
-          "allergens": [
-            "乳",
-            "小麦"
-          ]
-        },
-        {
-          "category": "週替わりパスタ夏季",
-          "items": [],
-          "status": null,
-          "notes": [],
-          "kcal": null,
-          "allergens": []
-        }
-      ],
-      "stale": true
+      "week_status": "missing",
+      "stale": false,
+      "week_start": null,
+      "image_hash": null,
+      "method": null,
+      "model": null,
+      "parser_version": null,
+      "parsed_at": null,
+      "days": [],
+      "weekly": [],
+      "next_week": {
+        "week_start": "2026-11-30",
+        "image_hash": "50f6190c48c14c74ec06c009103029ec2574e15c4f995bdcd33cc2ca861273f1",
+        "method": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "parser_version": 3,
+        "parsed_at": "2026-11-27 14:14",
+        "days": [
+          {
+            "key": "月",
+            "date": "11/30",
+            "sections": [
+              {
+                "category": "日替わりランチ（並）",
+                "items": [
+                  "チキングリルマヨマスタードソースプライドポテト＆パスタ"
+                ],
+                "status": null,
+                "notes": [],
+                "kcal": 1086,
+                "allergens": [
+                  "卵",
+                  "乳",
+                  "小麦"
+                ]
+              },
+              {
+                "category": "鉄板ランチ",
+                "items": [],
+                "status": "休止",
+                "notes": [],
+                "kcal": null,
+                "allergens": []
+              }
+            ]
+          },
+          {
+            "key": "火",
+            "date": "12/1",
+            "sections": [
+              {
+                "category": "日替わりランチ（並）",
+                "items": [
+                  "イタリアンチーズカツレツオムレツ＆パスタ"
+                ],
+                "status": null,
+                "notes": [],
+                "kcal": 1098,
+                "allergens": [
+                  "卵",
+                  "乳",
+                  "小麦"
+                ]
+              },
+              {
+                "category": "鉄板ランチ",
+                "items": [],
+                "status": "休止",
+                "notes": [],
+                "kcal": null,
+                "allergens": []
+              }
+            ]
+          },
+          {
+            "key": "水",
+            "date": "12/2",
+            "sections": [
+              {
+                "category": "日替わりランチ（並）",
+                "items": [
+                  "バジルチキンハーフメンチカツ＆パスタ"
+                ],
+                "status": null,
+                "notes": [],
+                "kcal": 1186,
+                "allergens": [
+                  "卵",
+                  "乳",
+                  "小麦"
+                ]
+              },
+              {
+                "category": "鉄板ランチ",
+                "items": [],
+                "status": "休止",
+                "notes": [],
+                "kcal": null,
+                "allergens": []
+              }
+            ]
+          },
+          {
+            "key": "木",
+            "date": "12/3",
+            "sections": [
+              {
+                "category": "日替わりランチ（並）",
+                "items": [
+                  "鶏の竜田揚げヤンニョムソース春雨サラダ"
+                ],
+                "status": null,
+                "notes": [],
+                "kcal": 1027,
+                "allergens": [
+                  "卵",
+                  "乳",
+                  "小麦"
+                ]
+              },
+              {
+                "category": "鉄板ランチ",
+                "items": [
+                  "手ごねハンバーグ＆チキンステーキ"
+                ],
+                "status": null,
+                "notes": [
+                  "11時半より販売致します",
+                  "オムライスの販売は休止致します"
+                ],
+                "kcal": 1218,
+                "allergens": [
+                  "卵",
+                  "乳",
+                  "小麦"
+                ]
+              }
+            ]
+          },
+          {
+            "key": "金",
+            "date": "12/4",
+            "sections": [
+              {
+                "category": "日替わりランチ（並）",
+                "items": [
+                  "ポークストロガノフコロッケ"
+                ],
+                "status": null,
+                "notes": [],
+                "kcal": 1087,
+                "allergens": [
+                  "卵",
+                  "乳",
+                  "小麦"
+                ]
+              },
+              {
+                "category": "鉄板ランチ",
+                "items": [],
+                "status": "休止",
+                "notes": [],
+                "kcal": null,
+                "allergens": []
+              }
+            ]
+          },
+          {
+            "key": "土",
+            "date": "12/5",
+            "sections": [
+              {
+                "category": "日替わりランチ（並）",
+                "items": [],
+                "status": "休み",
+                "notes": [],
+                "kcal": null,
+                "allergens": []
+              },
+              {
+                "category": "鉄板ランチ",
+                "items": [],
+                "status": null,
+                "notes": [],
+                "kcal": null,
+                "allergens": []
+              }
+            ]
+          }
+        ],
+        "weekly": [
+          {
+            "category": "週替わりパスタA",
+            "items": [],
+            "status": null,
+            "notes": [],
+            "kcal": null,
+            "allergens": []
+          },
+          {
+            "category": "週替わりパスタB",
+            "items": [
+              "ジェノベーゼ"
+            ],
+            "status": null,
+            "notes": [],
+            "kcal": 752,
+            "allergens": [
+              "乳",
+              "小麦"
+            ]
+          },
+          {
+            "category": "週替わりパスタ夏季",
+            "items": [],
+            "status": null,
+            "notes": [],
+            "kcal": null,
+            "allergens": []
+          }
+        ]
+      }
     }
-  ]
+  ],
+  "last_notified": "2026-11-27"
 }
