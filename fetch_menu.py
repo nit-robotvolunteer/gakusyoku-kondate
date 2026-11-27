@@ -29,7 +29,7 @@ from PIL import Image
 
 from menu_grid import DAY_KEYS, Cell, MenuGrid, cell_image_for_ocr, detect_grid, stitch_cells
 
-PARSER_VERSION = 3
+PARSER_VERSION = 3  # 週データの形式を変えたら上げる（キャッシュ無効化）
 PAGE_URL = "https://nitsc.co.jp/cafeteria/"
 CAFETERIAS = [
     {
@@ -41,17 +41,19 @@ CAFETERIAS = [
         "local_name": "1menu.png",
         "color": 0x0F766E,
         "categories": ["スペシャルランチ", "日替わりランチ", "日工大ランチ"],
+        "closed_days": [],
         "extra_categories": [],
     },
     {
         "id": "cafeteria2",
-        "name": "キッチン＆カフェトレビ",
+        "name": "キッチン＆カフェ トレビ",
         "short": "トレビ",
         "source_url": f"{PAGE_URL}#cafeteria2",
         "image_url": "https://nitsc.co.jp/userdata/2menu.png",
         "local_name": "2menu.png",
         "color": 0x2563EB,
         "categories": ["日替わりランチ（並）", "鉄板ランチ"],
+        "closed_days": ["土"],  # 土曜は休業
         "extra_categories": ["週替わりパスタA", "週替わりパスタB", "週替わりパスタ夏季"],
     },
 ]
@@ -540,75 +542,168 @@ def get_image_bytes(caf: dict, local_dir: str | None) -> bytes:
     return r.content
 
 
-def process_cafeteria(caf: dict, today: date, prev: dict, ocr_holder: dict, local_dir: str | None) -> tuple[dict, bytes]:
-    """(menu.json用の食堂データ, 今日の欄の原本画像PNG) を返す"""
-    result = {
-        "id": caf["id"],
-        "name": caf["name"],
-        "short": caf["short"],
-        "source_url": caf["source_url"],
-        "image_url": caf["image_url"],
-        "image_hash": "",
-        "method": "none",
-        "model": None,
-        "parser_version": PARSER_VERSION,
-        "parsed_at": None,
-        "error": None,
-        "days": [],
-        "weekly": [],
-    }
+WEEK_KEYS = ("week_start", "image_hash", "method", "model", "parser_version", "parsed_at", "days", "weekly")
+
+
+def monday_of(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+def infer_week_start(days: list[dict], today: date) -> date | None:
+    """各日の 'M/D' から、その表の週の月曜日を求める（年は今日にいちばん近いものを採用）"""
+    for i, day in enumerate(days or []):
+        m = re.fullmatch(r"(\d{1,2})/(\d{1,2})", str(day.get("date") or ""))
+        if not m:
+            continue
+        mon, dd = int(m.group(1)), int(m.group(2))
+        cands = []
+        for y in (today.year - 1, today.year, today.year + 1):
+            try:
+                cands.append(date(y, mon, dd))
+            except ValueError:
+                pass
+        if not cands:
+            continue
+        d = min(cands, key=lambda c: abs((c - today).days))
+        return monday_of(d)
+    return None
+
+
+def week_slot(src: dict | None, today: date) -> dict | None:
+    """menu.json の食堂データ（または next_week）から週データだけを取り出す"""
+    if not src or not src.get("days"):
+        return None
+    slot = {k: src.get(k) for k in WEEK_KEYS}
+    ws = slot.get("week_start")
+    try:
+        slot["week_start"] = date.fromisoformat(ws) if ws else infer_week_start(slot["days"], today)
+    except ValueError:
+        slot["week_start"] = infer_week_start(slot["days"], today)
+    return slot
+
+
+def parse_sheet(caf: dict, today: date, prev_caf: dict, ocr_holder: dict, local_dir: str | None) -> tuple[dict | None, bytes, str | None]:
+    """献立表画像を取得・解析して (週データ, 今日の列の原本画像, エラー) を返す。
+
+    週データは画像ハッシュが同じなら前回の結果（今週分・来週分どちらでも）を再利用する。
+    """
     try:
         img_bytes = get_image_bytes(caf, local_dir)
     except Exception as exc:
-        result["error"] = f"画像取得失敗: {exc}"
-        print(f"[WARN] {result['error']}")
-        return result, b""
+        print(f"[WARN] 画像取得失敗 {caf['name']}: {exc}")
+        return None, b"", f"画像取得失敗: {exc}"
 
     img_hash = hashlib.sha256(img_bytes).hexdigest()
-    result["image_hash"] = img_hash
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     grid = detect_grid(img)
     print(f"[INFO] {caf['name']}: 区分行 {len(grid.rows)} / 追加枠 {len(grid.extras)} を検出")
 
     today_key = WEEKDAY_MAP[today.weekday()]
     today_cells: list[Cell] = []
-    if today_key in DAY_KEYS:
+    if today_key in DAY_KEYS and grid.rows:
         today_cells = [r[today_key] for r in grid.rows] + list(grid.extras[: len(caf["extra_categories"])])
     crop_png = stitch_cells(img, today_cells) if today_cells else b""
 
-    cached = prev.get(caf["id"]) or {}
-    same_image = (
-        cached.get("image_hash") == img_hash
-        and cached.get("parser_version") == PARSER_VERSION
-        and not os.environ.get("FORCE_REPARSE")
-    )
-    if same_image and cached.get("method") == "gemini" and cached.get("days"):
+    force = bool(os.environ.get("FORCE_REPARSE"))
+    cached = None
+    for cand in (prev_caf, (prev_caf or {}).get("next_week")):
+        if cand and cand.get("image_hash") == img_hash and cand.get("parser_version") == PARSER_VERSION and cand.get("days"):
+            cached = week_slot(cand, today)
+            break
+    if cached and not force and cached.get("method") == "gemini":
         print(f"[INFO] キャッシュ再利用 {caf['name']}（Gemini解析済み・画像変更なし）")
-        for k in ("method", "model", "parsed_at", "days", "weekly"):
-            result[k] = cached.get(k)
-        return result, crop_png
+        return cached, crop_png, None
 
+    error = None
     data, info = parse_with_gemini(caf, img_bytes)
     if data:
         parsed = assemble_from_gemini(caf, data, grid, today)
-        result.update(method="gemini", model=info)
+        method, model = "gemini", info
         save_dish_dictionary([i for d in parsed["days"] for s in d["sections"] for i in s["items"]]
                              + [i for s in parsed["weekly"] for i in s["items"]])
     else:
-        result["error"] = f"Gemini不可: {info}"
-        if same_image and cached.get("method") == "local_ocr" and cached.get("days"):
+        error = f"Gemini不可: {info}"
+        if cached and not force and cached.get("method") == "local_ocr":
             print(f"[INFO] ローカルOCR結果のキャッシュを再利用 {caf['name']}")
-            for k in ("method", "parsed_at", "days", "weekly"):
-                result[k] = cached.get(k)
-            return result, crop_png
+            return cached, crop_png, error
         if "ocr" not in ocr_holder:
             ocr_holder["ocr"] = LocalOCR()
         parsed = parse_with_local_ocr(caf, img, grid, ocr_holder["ocr"], today)
-        result["method"] = "local_ocr" if ocr_holder["ocr"].engine else "none"
-    result["days"] = parsed["days"]
-    result["weekly"] = parsed["weekly"]
-    result["parsed_at"] = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
-    return result, crop_png
+        method, model = ("local_ocr" if ocr_holder["ocr"].engine else "none"), None
+
+    sheet = {
+        "image_hash": img_hash,
+        "method": method,
+        "model": model,
+        "parser_version": PARSER_VERSION,
+        "parsed_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M"),
+        "days": parsed["days"],
+        "weekly": parsed["weekly"],
+    }
+    sheet["week_start"] = infer_week_start(sheet["days"], today)
+    return sheet, crop_png, error
+
+
+def place_weeks(caf: dict, sheet: dict | None, crop: bytes, prev_caf: dict, today: date, error: str | None) -> tuple[dict, bytes]:
+    """新しく読んだ表を「今週」「来週」に振り分ける。
+
+    金曜などに来週分の表が掲載されても、今週分は前回の結果を使い続ける。
+    """
+    this_mon = monday_of(today)
+    prev_cur = week_slot(prev_caf, today)
+    prev_next = week_slot((prev_caf or {}).get("next_week"), today)
+
+    fresh_ws = sheet.get("week_start") if sheet else None
+    if sheet and fresh_ws is None:
+        sheet["week_start"] = fresh_ws = this_mon  # 日付が読めなかった表は今週分とみなす
+
+    current = nxt = None
+    current_is_fresh = False
+    # 今週分: 新しい表 → 前回の来週分（月曜に繰り上げ）→ 前回の今週分 の順で探す
+    for cand, fresh in ((sheet, True), (prev_next, False), (prev_cur, False)):
+        if cand and cand["week_start"] == this_mon:
+            current, current_is_fresh = cand, fresh
+            break
+    # 来週分
+    for cand in (sheet, prev_next, prev_cur):
+        if cand and cand["week_start"] and cand["week_start"] > this_mon:
+            nxt = cand
+            break
+
+    status = "ok"
+    if current is None:
+        older = [c for c in (sheet, prev_cur) if c and c["week_start"] and c["week_start"] < this_mon]
+        if older and not nxt:
+            current, current_is_fresh = older[0], older[0] is sheet
+            status = "stale"  # 献立表が今週分に更新されていない
+        else:
+            status = "missing"  # 来週分に差し替わっていて今週分が無い
+    if status == "ok" and current and sheet and current is not sheet and nxt is sheet:
+        print(f"[INFO] {caf['name']}: 来週分の献立表を検出（{fresh_ws}〜）。今週分は前回の結果を使用")
+
+    def dump(slot: dict | None) -> dict | None:
+        if not slot:
+            return None
+        out = dict(slot)
+        out["week_start"] = slot["week_start"].isoformat() if slot.get("week_start") else None
+        return out
+
+    result = {
+        "id": caf["id"],
+        "name": caf["name"],
+        "short": caf["short"],
+        "source_url": caf["source_url"],
+        "image_url": caf["image_url"],
+        "error": error,
+        "closed_days": caf.get("closed_days", []),
+        "week_status": status,
+        "stale": status == "stale",
+        **(dump(current) or {k: None for k in WEEK_KEYS}),
+        "next_week": dump(nxt),
+    }
+    result["days"] = result.get("days") or []
+    result["weekly"] = result.get("weekly") or []
+    return result, (crop if current_is_fresh else b"")
 
 
 # ---------------------------------------------------------------------------
@@ -657,13 +752,23 @@ def build_discord_payload(data: dict, today: date, crops: dict[str, bytes]) -> t
             "color": next((c["color"] for c in CAFETERIAS if c["id"] == caf["id"]), 0x64748B),
             "fields": [],
         }
+        if today_key in caf.get("closed_days", []):
+            embed["description"] = f"**{date_label}** は休業日です。"
+            embed["footer"] = {"text": "タイトルから献立表を開けます。"}
+            embeds.append(embed)
+            continue
         desc = [f"**{date_label}** のメニュー"]
-        if caf.get("stale"):
+        if caf.get("week_status") == "stale":
             desc.append(f"{WARN_MARK} 献立表が今週分に更新されていない可能性があります")
+        if caf.get("week_status") == "missing":
+            desc.append("献立表がすでに来週分に差し替わっていたため、今日のメニューを取得できませんでした。")
+            secs = []
         embed["description"] = "\n".join(desc)
 
         serving = [s for s in secs if s["items"]]
-        if not secs:
+        if not secs and caf.get("week_status") == "missing":
+            pass
+        elif not secs:
             if caf.get("method") == "gemini":
                 embed["description"] += "\n\n本日の提供情報はありません。"
             else:
@@ -737,24 +842,27 @@ def main() -> None:
     now = datetime.now(JST)
     today = date.fromisoformat(args.date) if args.date else now.date()
     prev = load_previous()
+    try:
+        with open(MENU_PATH, encoding="utf-8") as f:
+            last_notified = json.load(f).get("last_notified")
+    except Exception:
+        last_notified = None
+    # 本番チャンネルへの送信かどうか（ワークフローが prod / test を渡す）
+    to_prod = (os.environ.get("NOTIFY_TARGET") or "prod") == "prod"
+    is_schedule = os.environ.get("GITHUB_EVENT_NAME") == "schedule"
     ocr_holder: dict = {}
 
     cafeterias, crops = [], {}
     for caf in CAFETERIAS:
+        prev_caf = prev.get(caf["id"]) or {}
         try:
-            res, crop = process_cafeteria(caf, today, prev, ocr_holder, args.local_dir)
+            sheet, crop, err = parse_sheet(caf, today, prev_caf, ocr_holder, args.local_dir)
         except Exception as exc:  # 1食堂の失敗で通知全体を止めない
             import traceback
 
             traceback.print_exc()
-            res = {**(prev.get(caf["id"]) or {"id": caf["id"], "name": caf["name"], "image_url": caf["image_url"],
-                                                "source_url": caf["source_url"], "days": [], "weekly": []}),
-                   "method": "none", "error": f"処理失敗: {exc}"}
-            crop = b""
-        # 今日の日付が献立表の日付に含まれなければ「未更新」の可能性
-        today_label = f"{today.month}/{today.day}"
-        if res["days"] and today.weekday() < 6:
-            res["stale"] = today_label not in {d["date"] for d in res["days"]}
+            sheet, crop, err = None, b"", f"処理失敗: {exc}"
+        res, crop = place_weeks(caf, sheet, crop, prev_caf, today, err)
         cafeterias.append(res)
         crops[res["id"]] = crop
         if args.save_crops and crop:
@@ -767,9 +875,14 @@ def main() -> None:
         "updated_at": now.strftime("%Y-%m-%d %H:%M"),
         "source_url": PAGE_URL,
         "cafeterias": cafeterias,
+        "last_notified": last_notified,  # 本番チャンネルに最後に通知した日（二重通知の防止用）
     }
-    with open(MENU_PATH, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    def write_menu() -> None:
+        with open(MENU_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    write_menu()
     print("[INFO] menu.json を更新しました")
 
     if today.weekday() == 6:
@@ -779,8 +892,16 @@ def main() -> None:
     if args.discord_preview:
         with open(args.discord_preview, "w", encoding="utf-8") as f:
             json.dump({"payload": discord_payload, "files": [n for n, _ in files]}, f, ensure_ascii=False, indent=2)
-    if not args.no_discord:
-        send_discord(discord_payload, files)
+    if args.no_discord:
+        return
+    # 定期実行は保険として1日2回動く。本番へ通知済みなら2回目は送らない
+    if is_schedule and last_notified == today.isoformat():
+        print("[INFO] 今日はすでに通知済みのため送信しません（予備の定期実行）")
+        return
+    send_discord(discord_payload, files)
+    if to_prod and DISCORD_WEBHOOK_URLS:
+        payload["last_notified"] = today.isoformat()
+        write_menu()
 
 
 if __name__ == "__main__":
