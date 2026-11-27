@@ -88,11 +88,37 @@ a {
   max-width: 1040px;
   margin: 0 auto;
   padding: 12px 16px 4px;
-  display: flex;
-  flex-wrap: wrap;
+  /* 左：タイトル／中央：今週・来週／右：更新日時 */
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
   gap: 4px 12px;
+}
+
+/* やや狭い画面（375〜389px）では文字と余白を少し詰めて1行に収める */
+@media (max-width: 389px) {
+  .top-inner {
+    column-gap: 8px;
+  }
+
+  .brand {
+    font-size: 1.0625rem;
+  }
+
+  .week-btn {
+    padding-inline: 10px;
+  }
+
+  .updated {
+    font-size: 0.75rem;
+  }
+}
+
+/* それでも入らない狭い画面では、更新日時だけ次の行の右端へ */
+@media (max-width: 374px) {
+  .top-inner .updated {
+    grid-column: 1 / -1;
+  }
 }
 
 .brand {
@@ -108,8 +134,7 @@ a {
   position: relative;
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
-  flex-shrink: 0;
-  margin-right: auto;
+  justify-self: center;
   padding: 2px;
   border-radius: 999px;
   background: var(--paper);
@@ -164,7 +189,8 @@ a {
 }
 
 .updated {
-  margin: 0 0 0 auto;
+  margin: 0;
+  justify-self: end;
   white-space: nowrap;
   font-size: var(--step--1);
   color: var(--ink-2);
