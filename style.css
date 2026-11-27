@@ -47,6 +47,8 @@
 html {
   /* ダブルタップでの拡大を無効化（ピンチでの拡大はできるまま） */
   touch-action: manipulation;
+  /* スクロールバーの幅を常に確保し、出たり消えたりしても横幅が変わらないようにする（PC） */
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -87,13 +89,15 @@ a {
   margin: 0 auto;
   padding: 12px 16px 4px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 4px 12px;
 }
 
 .brand {
   margin: 0;
+  white-space: nowrap;
   font-family: var(--font-round);
   font-weight: 900;
   font-size: var(--step-1);
@@ -101,7 +105,10 @@ a {
 }
 
 .week-switch {
-  display: inline-flex;
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  flex-shrink: 0;
   margin-right: auto;
   padding: 2px;
   border-radius: 999px;
@@ -113,7 +120,25 @@ a {
   display: none;
 }
 
+/* 選択中の週を示す黒い部分。ボタンの下を左右にスライドする */
+.week-indicator {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: 999px;
+  background: var(--ink);
+  transition: transform 0.28s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+
+.week-switch[data-week="next"] .week-indicator {
+  transform: translateX(100%);
+}
+
 .week-btn {
+  position: relative;
+  z-index: 1;
   padding: 2px 12px;
   border: 0;
   border-radius: 999px;
@@ -123,15 +148,24 @@ a {
   font-size: var(--step--1);
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s;
 }
 
 .week-btn[aria-pressed="true"] {
-  background: var(--ink);
   color: var(--page);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .week-indicator,
+  .week-btn {
+    transition: none;
+  }
+}
+
 .updated {
-  margin: 0;
+  margin: 0 0 0 auto;
+  white-space: nowrap;
   font-size: var(--step--1);
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
