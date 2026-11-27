@@ -228,11 +228,26 @@ function cafeteriaBlock(caf) {
       state.week === "next"
         ? "来週の献立表はまだ掲載されていません。"
         : caf.week_status === "missing"
-          ? "公開中の献立表がすでに来週分のため、今週の献立を表示できません。「来週」から来週分を見られます。"
+          ? "公開中の献立表がすでに来週分のため、今週の献立は表示できません。"
           : caf.week_status === "pending"
             ? "今週の献立はまだ取得できていません。毎朝8時ごろに更新されます。"
             : "今週の献立を取得できませんでした。";
-    block.append(el("p", { class: "caf-empty", text }));
+    const box = el("div", { class: "caf-empty" }, el("p", { text }));
+    if (state.week === "this" && caf.week_status === "missing" && caf.next_week) {
+      box.append(
+        el("button", {
+          type: "button",
+          class: "caf-empty-action",
+          text: "来週の献立を見る",
+          onclick: () => {
+            state.week = "next";
+            selectDay("月", true);
+            window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+          },
+        })
+      );
+    }
+    block.append(box);
     return block;
   }
 
