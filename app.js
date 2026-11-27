@@ -7,6 +7,7 @@ const STORE_KEY = "kondate.avoid";
 const state = {
   data: null,
   day: null,
+  week: "this", // "this"（今週）か "next"（来週）
   avoid: new Set(loadAvoid()),
 };
 
@@ -46,9 +47,19 @@ function todayKey() {
   return idx === 0 ? null : DAY_KEYS[idx - 1];
 }
 
+function hasNextWeek() {
+  return state.data.cafeterias.some((c) => c.next_week && c.next_week.days.length);
+}
+
+// 選択中の週のデータ（今週は食堂データそのもの、来週は next_week）
+function weekOf(caf) {
+  return state.week === "next" ? caf.next_week : caf;
+}
+
 function dateFor(key) {
   for (const caf of state.data.cafeterias) {
-    const d = (caf.days || []).find((x) => x.key === key);
+    const w = weekOf(caf);
+    const d = ((w && w.days) || []).find((x) => x.key === key);
     if (d && d.date) return d.date;
   }
   return "";
@@ -58,7 +69,7 @@ function dateFor(key) {
 function renderDayTabs() {
   const wrap = document.getElementById("day-tabs");
   wrap.replaceChildren();
-  const tk = todayKey();
+  const tk = state.week === "this" ? todayKey() : null;
   DAY_KEYS.forEach((key) => {
     const selected = key === state.day;
     const date = dateFor(key);
@@ -98,9 +109,42 @@ function onTabKey(e) {
 
 function selectDay(key, push) {
   state.day = key;
-  if (push) history.replaceState(null, "", `#${encodeURIComponent(key)}`);
+  if (push) {
+    const hash = (state.week === "next" ? "来週" : "") + key;
+    history.replaceState(null, "", `#${encodeURIComponent(hash)}`);
+  }
+  renderWeekSwitch();
   renderDayTabs();
   renderCafeterias();
+}
+
+/* ---------- 今週／来週 ---------- */
+function renderWeekSwitch() {
+  const wrap = document.getElementById("week-switch");
+  if (!hasNextWeek()) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  wrap.replaceChildren(
+    ...[
+      ["this", "今週"],
+      ["next", "来週"],
+    ].map(([w, label]) =>
+      el("button", {
+        type: "button",
+        class: "week-btn",
+        "aria-pressed": state.week === w ? "true" : "false",
+        text: label,
+        onclick: () => {
+          if (state.week === w) return;
+          state.week = w;
+          // 来週に切り替えたら月曜から、今週に戻したら今日から
+          selectDay(w === "next" ? "月" : todayKey() || "月", true);
+        },
+      })
+    )
+  );
 }
 
 /* ---------- 食券カード ---------- */
@@ -148,8 +192,9 @@ function ticket(sec, cafId) {
 }
 
 function cafeteriaBlock(caf) {
-  const day = (caf.days || []).find((d) => d.key === state.day);
-  const secs = [...(day ? day.sections : []), ...(caf.weekly || [])].filter(
+  const w = weekOf(caf) || { days: [], weekly: [] };
+  const day = (w.days || []).find((d) => d.key === state.day);
+  const secs = [...(day ? day.sections : []), ...(w.weekly || [])].filter(
     (s) => s.items.length || s.status || s.notes.length
   );
   const serving = secs.filter((s) => s.items.length);
@@ -159,12 +204,35 @@ function cafeteriaBlock(caf) {
     "header",
     { class: "caf-head" },
     el("h2", { class: "caf-name", text: caf.name }),
-    el("a", { class: "caf-source", href: caf.image_url, target: "_blank", rel: "noopener", text: "今週の献立" })
+    el("a", {
+      class: "caf-source",
+      href: caf.image_url,
+      target: "_blank",
+      rel: "noopener",
+      // 公開中の献立表がすでに来週分なら、リンク名もそれに合わせる
+      text: caf.next_week && caf.next_week.image_hash && caf.next_week.image_hash !== caf.image_hash ? "来週の献立" : "今週の献立",
+    })
   );
 
   const block = el("section", { class: "caf", "data-caf": caf.id, "aria-label": caf.name }, head);
 
-  if (caf.method && caf.method !== "gemini") {
+  if ((caf.closed_days || []).includes(state.day)) {
+    block.append(el("p", { class: "caf-empty", text: `${state.day}曜日は休業日です。` }));
+    return block;
+  }
+
+  if (!w.days.length) {
+    const text =
+      state.week === "next"
+        ? "来週の献立表はまだ掲載されていません。"
+        : caf.week_status === "missing"
+          ? "公開中の献立表がすでに来週分のため、今週の献立を表示できません。「来週」から来週分を見られます。"
+          : "今週の献立を取得できませんでした。";
+    block.append(el("p", { class: "caf-empty", text }));
+    return block;
+  }
+
+  if (w.method && w.method !== "gemini") {
     block.append(
       el(
         "p",
@@ -174,7 +242,7 @@ function cafeteriaBlock(caf) {
       )
     );
   }
-  if (caf.stale && state.day === todayKey()) {
+  if (state.week === "this" && caf.week_status === "stale" && state.day === todayKey()) {
     block.append(el("p", { class: "caf-caution", text: "献立表が今週分に更新されていない可能性があります。" }));
   }
 
@@ -252,13 +320,14 @@ function showNotice(text) {
 
 function normalize(data) {
   // 旧形式(menu_parsed)のデータが来た場合も落ちないようにする
+  const normWeek = (w) => ({
+    ...w,
+    days: (w.days || []).map((d) => ({ ...d, sections: (d.sections || []).map(normSec) })),
+    weekly: (w.weekly || []).map(normSec),
+  });
   data.cafeterias = (data.cafeterias || []).map((c) => ({
-    ...c,
-    days: (c.days || []).map((d) => ({
-      ...d,
-      sections: (d.sections || []).map(normSec),
-    })),
-    weekly: (c.weekly || []).map(normSec),
+    ...normWeek(c),
+    next_week: c.next_week ? normWeek(c.next_week) : null,
   }));
   return data;
 }
@@ -279,17 +348,31 @@ async function init() {
     const res = await fetch(`./menu.json?t=${Date.now()}`);
     if (!res.ok) throw new Error(`menu.json を取得できませんでした（${res.status}）`);
     state.data = normalize(await res.json());
-    if (!state.data.cafeterias.some((c) => c.days.length)) {
+    if (!state.data.cafeterias.some((c) => c.days.length || (c.next_week && c.next_week.days.length))) {
       throw new Error("メニューのデータがまだありません。次の自動更新をお待ちください。");
     }
 
     const [d, t] = (state.data.updated_at || "").split(" ");
     updated.textContent = d ? `${d.slice(5).replace("-", "/")} ${t || ""} 更新` : "";
 
-    const fromHash = decodeURIComponent(location.hash.slice(1));
+    let fromHash = decodeURIComponent(location.hash.slice(1));
+    if (fromHash.startsWith("来週") && hasNextWeek()) {
+      state.week = "next";
+      fromHash = fromHash.slice(2);
+    }
     const tk = todayKey();
-    state.day = DAY_KEYS.includes(fromHash) ? fromHash : tk || "月";
-    if (!tk && !DAY_KEYS.includes(fromHash)) showNotice("今日は日曜日です。月曜日のメニューを表示しています。");
+    if (DAY_KEYS.includes(fromHash)) {
+      state.day = fromHash;
+    } else if (tk) {
+      state.day = tk;
+    } else if (hasNextWeek()) {
+      state.week = "next";
+      state.day = "月";
+      showNotice("今日は日曜日です。来週月曜日のメニューを表示しています。");
+    } else {
+      state.day = "月";
+      showNotice("今日は日曜日です。今週月曜日のメニューを表示しています。");
+    }
 
     renderFilter();
     selectDay(state.day, false);
