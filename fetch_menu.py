@@ -754,7 +754,7 @@ def build_discord_payload(data: dict, today: date, crops: dict[str, bytes]) -> t
         }
         if today_key in caf.get("closed_days", []):
             embed["description"] = f"**{date_label}** は休業日です。"
-            embed["footer"] = {"text": "タイトルから献立表を開けます。"}
+            embed["footer"] = {"text": "タイトルから献立表を確認できます。"}
             embeds.append(embed)
             continue
         desc = [f"**{date_label}** のメニュー"]
@@ -791,10 +791,13 @@ def build_discord_payload(data: dict, today: date, crops: dict[str, bytes]) -> t
             fname = f"today_{caf['id']}.png"
             embed["image"] = {"url": f"attachment://{fname}"}
             files.append((fname, crop))
-        if method == "gemini":
-            footer = "タイトルから献立表を開けます。献立表を自動で読み取っています。"
+        if caf.get("week_status") == "missing":
+            # 公開中の献立表はすでに来週分（今週分の読み取り結果が無い）
+            footer = "タイトルから来週の献立表を確認できます。献立表を自動で読み取っています。"
+        elif method == "gemini":
+            footer = "タイトルから献立表を確認できます。献立表を自動で読み取っています。"
         else:
-            footer = "タイトルから献立表を開けます。簡易読み取りのため誤字があるかもしれません（下の画像が原本です）。"
+            footer = "タイトルから献立表を確認できます。簡易読み取りのため誤字があるかもしれません（下の画像が原本です）。"
         embed["footer"] = {"text": footer}
         embeds.append(embed)
 
