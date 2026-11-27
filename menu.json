@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-11-27 09:17",
+  "updated_at": "2026-11-27 14:14",
   "source_url": "https://nitsc.co.jp/cafeteria/",
   "cafeterias": [
     {
@@ -305,26 +305,25 @@
       "short": "トレビ",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria2",
       "image_url": "https://nitsc.co.jp/userdata/2menu.png",
-      "image_hash": "d60b8d80ddb647a81b9554a36246fef1140fe12c967a8a110118108d60b2b2b0",
+      "image_hash": "50f6190c48c14c74ec06c009103029ec2574e15c4f995bdcd33cc2ca861273f1",
       "method": "gemini",
       "model": "gemini-3.5-flash-lite",
       "parser_version": 3,
-      "parsed_at": "2026-11-26 21:38",
+      "parsed_at": "2026-11-27 14:14",
       "error": null,
       "days": [
         {
           "key": "月",
-          "date": "11/23",
+          "date": "11/30",
           "sections": [
             {
               "category": "日替わりランチ（並）",
               "items": [
-                "とろたまチキングリル",
-                "ハーフメンチカツ＆パスタ"
+                "チキングリルマヨマスタードソースプライドポテト＆パスタ"
               ],
               "status": null,
               "notes": [],
-              "kcal": 1113,
+              "kcal": 1086,
               "allergens": [
                 "卵",
                 "乳",
@@ -343,17 +342,16 @@
         },
         {
           "key": "火",
-          "date": "11/24",
+          "date": "12/1",
           "sections": [
             {
               "category": "日替わりランチ（並）",
               "items": [
-                "温玉のせピリ辛焼肉丼",
-                "コロッケ"
+                "イタリアンチーズカツレツオムレツ＆パスタ"
               ],
               "status": null,
               "notes": [],
-              "kcal": 1329,
+              "kcal": 1098,
               "allergens": [
                 "卵",
                 "乳",
@@ -372,17 +370,16 @@
         },
         {
           "key": "水",
-          "date": "11/25",
+          "date": "12/2",
           "sections": [
             {
               "category": "日替わりランチ（並）",
               "items": [
-                "テリヤキ月見ハンバーグ",
-                "カリーヴルスト（ウィンナー＆ポテト）"
+                "バジルチキンハーフメンチカツ＆パスタ"
               ],
               "status": null,
               "notes": [],
-              "kcal": 1064,
+              "kcal": 1186,
               "allergens": [
                 "卵",
                 "乳",
@@ -401,17 +398,16 @@
         },
         {
           "key": "木",
-          "date": "11/26",
+          "date": "12/3",
           "sections": [
             {
               "category": "日替わりランチ（並）",
               "items": [
-                "鶏の竜田揚げ和風ネギ塩ソース",
-                "ロールキャベツ"
+                "鶏の竜田揚げヤンニョムソース春雨サラダ"
               ],
               "status": null,
               "notes": [],
-              "kcal": 942,
+              "kcal": 1027,
               "allergens": [
                 "卵",
                 "乳",
@@ -421,36 +417,34 @@
             {
               "category": "鉄板ランチ",
               "items": [
-                "鉄鍋ビビンバ丼"
+                "手ごねハンバーグ＆チキンステーキ"
               ],
               "status": null,
               "notes": [
                 "11時半より販売致します",
                 "オムライスの販売は休止致します"
               ],
-              "kcal": 1036,
+              "kcal": 1218,
               "allergens": [
                 "卵",
                 "乳",
-                "小麦",
-                "えび"
+                "小麦"
               ]
             }
           ]
         },
         {
           "key": "金",
-          "date": "11/27",
+          "date": "12/4",
           "sections": [
             {
               "category": "日替わりランチ（並）",
               "items": [
-                "チキンのトマトクリームシチュー",
-                "フライドポテト＆パスタ"
+                "ポークストロガノフコロッケ"
               ],
               "status": null,
               "notes": [],
-              "kcal": 1058,
+              "kcal": 1087,
               "allergens": [
                 "卵",
                 "乳",
@@ -469,7 +463,7 @@
         },
         {
           "key": "土",
-          "date": "11/28",
+          "date": "12/5",
           "sections": [
             {
               "category": "日替わりランチ（並）",
@@ -493,24 +487,24 @@
       "weekly": [
         {
           "category": "週替わりパスタA",
-          "items": [
-            "鶏肉とキャベツのクリーム"
-          ],
-          "status": null,
-          "notes": [],
-          "kcal": 735,
-          "allergens": [
-            "乳",
-            "小麦"
-          ]
-        },
-        {
-          "category": "週替わりパスタB",
           "items": [],
           "status": null,
           "notes": [],
           "kcal": null,
           "allergens": []
+        },
+        {
+          "category": "週替わりパスタB",
+          "items": [
+            "ジェノベーゼ"
+          ],
+          "status": null,
+          "notes": [],
+          "kcal": 752,
+          "allergens": [
+            "乳",
+            "小麦"
+          ]
         },
         {
           "category": "週替わりパスタ夏季",
@@ -521,7 +515,7 @@
           "allergens": []
         }
       ],
-      "stale": false
+      "stale": true
     }
   ]
 }
