@@ -135,18 +135,42 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// 週を切り替えたときだけ、中身を進む向きから軽くスライドさせて入れ替わりを分かりやすくする
-function animateWeekChange(dir) {
+// 週の切り替えで「変わる中身」だけを動かす。
+// 曜日タブの枠や食堂の見出しは動かさない。ただしスマホなど縦並びの画面で
+// 上の食堂のメニュー数が変わって位置がずれる要素は、元の位置から滑らかに移動させる（FLIP）。
+const SLIDE = { duration: 240, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" };
+const MOVE = { duration: 320, easing: "cubic-bezier(0.3, 0.7, 0.2, 1)" };
+
+function blockTops() {
+  const tops = new Map();
+  document.querySelectorAll(".caf, .foot").forEach((n) => tops.set(n.dataset.caf || "foot", n.getBoundingClientRect().top));
+  return tops;
+}
+
+function animateWeekChange(dir, beforeTops) {
   if (prefersReducedMotion() || !Element.prototype.animate) return;
-  for (const id of ["day-tabs", "app"]) {
-    document.getElementById(id).animate(
+  const slideIn = (node, dist) =>
+    node.animate(
       [
-        { opacity: 0, transform: `translateX(${dir * 28}px)` },
+        { opacity: 0, transform: `translateX(${dir * dist}px)` },
         { opacity: 1, transform: "none" },
       ],
-      { duration: 240, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" }
+      SLIDE
     );
-  }
+
+  // 曜日タブ: 枠はそのまま、曜日・日付だけ入れ替える。「今日」タグはふわっと付け外し
+  document.querySelectorAll(".day-tab-key, .day-tab-date").forEach((n) => slideIn(n, 10));
+  document.querySelectorAll(".day-tab-today").forEach((n) => n.animate([{ opacity: 0 }, { opacity: 1 }], SLIDE));
+
+  // 食堂: 見出しの下の中身だけ入れ替え、ブロック自体は位置が変わったときだけ縦に滑らせる
+  document.querySelectorAll(".caf, .foot").forEach((block) => {
+    const before = beforeTops.get(block.dataset.caf || "foot");
+    const dy = before === undefined ? 0 : before - block.getBoundingClientRect().top;
+    if (Math.abs(dy) > 1) block.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], MOVE);
+    if (block.classList.contains("caf")) {
+      [...block.children].filter((c) => !c.classList.contains("caf-head")).forEach((c) => slideIn(c, 28));
+    }
+  });
 }
 
 function selectDay(key, push) {
@@ -162,9 +186,10 @@ function selectDay(key, push) {
 
 function changeWeek(week, day) {
   if (state.week === week) return;
+  const beforeTops = blockTops();
   state.week = week;
   selectDay(day, true);
-  animateWeekChange(week === "next" ? 1 : -1);
+  animateWeekChange(week === "next" ? 1 : -1, beforeTops);
 }
 
 /* ---------- 今週／来週 ---------- */
