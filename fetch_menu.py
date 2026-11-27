@@ -6,11 +6,8 @@
   3. 画像が前回と同じで、前回 Gemini 解析に成功していれば → キャッシュをそのまま使う
      （献立表は週1回しか変わらないので、Gemini 呼び出しは実質週1回）
   4. 新しい画像なら画像全体を Gemini に渡し「1週間分」を構造化 JSON で取得
-  5. Gemini が使えないときはセル単位のローカル OCR ＋ 料理名辞書補正にフォールバック
+  5. Gemini が使えないときはセル単位の簡易 OCR ＋ 料理名辞書補正にフォールバック
   6. menu.json を書き出し、Discord に今日の分を通知
-
-ローカル検証:
-  python fetch_menu.py --local-dir ./samples --date 2026-11-26 --no-discord --discord-preview preview.json
 """
 from __future__ import annotations
 
@@ -309,7 +306,7 @@ def assemble_from_gemini(caf: dict, data: dict, grid: MenuGrid, today: date) -> 
 
 
 # ---------------------------------------------------------------------------
-# ローカルOCR（フォールバック）
+# 簡易OCR（フォールバック）
 # ---------------------------------------------------------------------------
 # 簡体字モデル由来の字形を日本語に戻す（文脈に依らず安全なものだけ）
 SIMPLIFIED_TO_JA = str.maketrans({
@@ -624,7 +621,7 @@ def parse_sheet(caf: dict, today: date, prev_caf: dict, ocr_holder: dict, local_
     else:
         error = f"Gemini不可: {info}"
         if cached and not force and cached.get("method") == "local_ocr":
-            print(f"[INFO] ローカルOCR結果のキャッシュを再利用 {caf['name']}")
+            print(f"[INFO] 簡易OCR結果のキャッシュを再利用 {caf['name']}")
             return cached, crop_png, error
         if "ocr" not in ocr_holder:
             ocr_holder["ocr"] = LocalOCR()
