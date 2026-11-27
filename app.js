@@ -1,6 +1,9 @@
 "use strict";
 
 const DAY_KEYS = ["月", "火", "水", "木", "金", "土"];
+// URL の # 以降に使う英字（#wed = 今週水曜、#next-wed = 来週水曜）
+const DAY_SLUGS = { 月: "mon", 火: "tue", 水: "wed", 木: "thu", 金: "fri", 土: "sat" };
+const NEXT_PREFIX = "next-";
 const ALLERGENS = ["卵", "乳", "小麦", "えび", "かに", "そば", "落花生"];
 const STORE_KEY = "kondate.avoid";
 
@@ -109,15 +112,59 @@ function onTabKey(e) {
   document.querySelector(`.day-tab[data-key="${next}"]`)?.focus();
 }
 
+function hashFor(week, key) {
+  return `#${week === "next" ? NEXT_PREFIX : ""}${DAY_SLUGS[key]}`;
+}
+
+// "#next-wed" / "#wed"（旧形式の "#来週水" / "#水" も読む）→ { week, day }
+function parseHash(raw) {
+  let h = decodeURIComponent(raw.replace(/^#/, "")).toLowerCase();
+  let week = "this";
+  if (h.startsWith(NEXT_PREFIX)) {
+    week = "next";
+    h = h.slice(NEXT_PREFIX.length);
+  } else if (h.startsWith("来週")) {
+    week = "next";
+    h = h.slice(2);
+  }
+  const day = DAY_KEYS.find((k) => DAY_SLUGS[k] === h || k === h) || null;
+  return { week, day };
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// 週を切り替えたときだけ、中身を進む向きから軽くスライドさせて入れ替わりを分かりやすくする
+function animateWeekChange(dir) {
+  if (prefersReducedMotion() || !Element.prototype.animate) return;
+  for (const id of ["day-tabs", "app"]) {
+    document.getElementById(id).animate(
+      [
+        { opacity: 0, transform: `translateX(${dir * 28}px)` },
+        { opacity: 1, transform: "none" },
+      ],
+      { duration: 240, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" }
+    );
+  }
+}
+
 function selectDay(key, push) {
   state.day = key;
   if (push) {
-    const hash = (state.week === "next" ? "来週" : "") + key;
-    history.replaceState(null, "", `#${encodeURIComponent(hash)}`);
+    history.replaceState(null, "", hashFor(state.week, key));
+    document.getElementById("notice").hidden = true; // 日曜の案内などは操作したら消す
   }
   renderWeekSwitch();
   renderDayTabs();
   renderCafeterias();
+}
+
+function changeWeek(week, day) {
+  if (state.week === week) return;
+  state.week = week;
+  selectDay(day, true);
+  animateWeekChange(week === "next" ? 1 : -1);
 }
 
 /* ---------- 今週／来週 ---------- */
@@ -127,26 +174,27 @@ function renderWeekSwitch() {
     wrap.hidden = true;
     return;
   }
-  wrap.hidden = false;
-  wrap.replaceChildren(
-    ...[
-      ["this", "今週"],
-      ["next", "来週"],
-    ].map(([w, label]) =>
-      el("button", {
-        type: "button",
-        class: "week-btn",
-        "aria-pressed": state.week === w ? "true" : "false",
-        text: label,
-        onclick: () => {
-          if (state.week === w) return;
-          state.week = w;
+  if (!wrap.childElementCount) {
+    wrap.append(
+      el("span", { class: "week-indicator", "aria-hidden": "true" }),
+      ...[
+        ["this", "今週"],
+        ["next", "来週"],
+      ].map(([w, label]) =>
+        el("button", {
+          type: "button",
+          class: "week-btn",
+          "data-week": w,
+          text: label,
           // 来週に切り替えたら月曜から、今週に戻したら今日から
-          selectDay(w === "next" ? "月" : todayKey() || "月", true);
-        },
-      })
-    )
-  );
+          onclick: () => changeWeek(w, w === "next" ? "月" : todayKey() || "月"),
+        })
+      )
+    );
+  }
+  wrap.hidden = false;
+  wrap.dataset.week = state.week;
+  wrap.querySelectorAll(".week-btn").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.week === state.week)));
 }
 
 /* ---------- 食券カード ---------- */
@@ -240,9 +288,8 @@ function cafeteriaBlock(caf) {
           class: "caf-empty-action",
           text: "来週の献立を見る",
           onclick: () => {
-            state.week = "next";
-            selectDay("月", true);
-            window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+            changeWeek("next", "月");
+            window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
           },
         })
       );
@@ -400,14 +447,11 @@ async function init() {
     const [d, t] = (state.data.updated_at || "").split(" ");
     updated.textContent = d ? `${d.slice(5).replace("-", "/")} ${t || ""} 更新` : "";
 
-    let fromHash = decodeURIComponent(location.hash.slice(1));
-    if (fromHash.startsWith("来週") && hasNextWeek()) {
-      state.week = "next";
-      fromHash = fromHash.slice(2);
-    }
+    const fromHash = parseHash(location.hash);
+    if (fromHash.week === "next" && hasNextWeek()) state.week = "next";
     const tk = todayKey();
-    if (DAY_KEYS.includes(fromHash)) {
-      state.day = fromHash;
+    if (fromHash.day) {
+      state.day = fromHash.day;
     } else if (tk) {
       state.day = tk;
     } else if (hasNextWeek()) {
@@ -421,6 +465,18 @@ async function init() {
 
     renderFilter();
     selectDay(state.day, false);
+    // 旧形式（#来週水 など）で開かれたら英字のURLに置き換える
+    if (location.hash && location.hash !== hashFor(state.week, state.day)) {
+      history.replaceState(null, "", hashFor(state.week, state.day));
+    }
+    // アドレスバーで # 以降を書き換えたときも表示を合わせる
+    window.addEventListener("hashchange", () => {
+      const h = parseHash(location.hash);
+      if (!h.day) return;
+      const week = h.week === "next" && hasNextWeek() ? "next" : "this";
+      if (week !== state.week) changeWeek(week, h.day);
+      else selectDay(h.day, false);
+    });
   } catch (err) {
     updated.textContent = "";
     document.getElementById("app").replaceChildren(
