@@ -57,7 +57,9 @@ function weekOf(caf) {
 }
 
 function dateFor(key) {
-  for (const caf of state.data.cafeterias) {
+  // 表が古いままの食堂より、正しい週のデータを持つ食堂の日付を優先する
+  const cafs = [...state.data.cafeterias].sort((a, b) => (a.week_status === "stale") - (b.week_status === "stale"));
+  for (const caf of cafs) {
     const w = weekOf(caf);
     const d = ((w && w.days) || []).find((x) => x.key === key);
     if (d && d.date) return d.date;
@@ -227,7 +229,9 @@ function cafeteriaBlock(caf) {
         ? "来週の献立表はまだ掲載されていません。"
         : caf.week_status === "missing"
           ? "公開中の献立表がすでに来週分のため、今週の献立を表示できません。「来週」から来週分を見られます。"
-          : "今週の献立を取得できませんでした。";
+          : caf.week_status === "pending"
+            ? "今週の献立はまだ取得できていません。毎朝8時ごろに更新されます。"
+            : "今週の献立を取得できませんでした。";
     block.append(el("p", { class: "caf-empty", text }));
     return block;
   }
@@ -325,12 +329,38 @@ function normalize(data) {
     days: (w.days || []).map((d) => ({ ...d, sections: (d.sections || []).map(normSec) })),
     weekly: (w.weekly || []).map(normSec),
   });
-  data.cafeterias = (data.cafeterias || []).map((c) => ({
-    ...normWeek(c),
-    next_week: c.next_week ? normWeek(c.next_week) : null,
-  }));
+  const thisMon = mondayISO(new Date());
+  const ranThisWeek = (data.updated_at || "").slice(0, 10) >= thisMon;
+  data.cafeterias = (data.cafeterias || []).map((c) => assignWeeks(normWeek(c), c.next_week ? normWeek(c.next_week) : null, thisMon, ranThisWeek));
   return data;
 }
+
+const WEEK_FIELDS = ["week_start", "image_hash", "method", "model", "parsed_at", "days", "weekly"];
+
+// ブラウザの今日の日付を基準に「今週」「来週」を振り分け直す。
+// （月曜の朝、その週の自動更新が走る前に開いても、先週分を今週として見せないため）
+function assignWeeks(cur, next, thisMon, ranThisWeek) {
+  const slots = [cur, next].filter((s) => s && s.days.length);
+  if (!slots.some((s) => s.week_start)) return { ...cur, next_week: next }; // 古い形式のデータ
+  const meta = { ...cur };
+  WEEK_FIELDS.forEach((k) => delete meta[k]);
+  const empty = { days: [], weekly: [] };
+  const thisWeek = slots.find((s) => s.week_start === thisMon);
+  const nextWeek = slots.find((s) => s.week_start && s.week_start > thisMon) || null;
+  if (thisWeek) return { ...meta, ...thisWeek, week_status: "ok", next_week: nextWeek };
+  const older = slots.find((s) => s.week_start && s.week_start < thisMon);
+  if (nextWeek) return { ...meta, ...empty, week_status: "missing", next_week: nextWeek };
+  if (older && ranThisWeek) return { ...meta, ...older, week_status: "stale", next_week: null };
+  // 今週の自動更新がまだ（月曜の早朝など）
+  return { ...meta, ...empty, week_status: "pending", next_week: null };
+}
+
+function mondayISO(d) {
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${m.getFullYear()}-${pad(m.getMonth() + 1)}-${pad(m.getDate())}`;
+}
+
 function normSec(s) {
   return {
     category: s.category || "メニュー",
