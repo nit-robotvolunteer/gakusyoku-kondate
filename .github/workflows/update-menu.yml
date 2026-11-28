@@ -51,7 +51,7 @@ jobs:
 
       - name: Run fetch_menu.py
         env:
-          # 定期実行は本番へ。手動実行で「テスト用チャンネルにだけ」を選ぶとテスト用へ
+          # 定期実行は本番へ。手動実行で「テスト用チャンネルにだけ」を選ぶとテスト用へ通知
           DISCORD_WEBHOOK_URL: ${{ inputs.test_only && secrets.DISCORD_WEBHOOK_URL_TEST || secrets.DISCORD_WEBHOOK_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # 任意: 公開ページURL（通知にリンクが付く）、使うGeminiモデルの順番
