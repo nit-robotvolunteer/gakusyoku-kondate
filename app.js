@@ -177,7 +177,6 @@ function selectDay(key, push) {
   state.day = key;
   if (push) {
     history.replaceState(null, "", hashFor(state.week, key));
-    document.getElementById("notice").hidden = true; // 日曜の案内などは操作したら消す
   }
   renderWeekSwitch();
   renderDayTabs();
@@ -479,14 +478,13 @@ async function init() {
       state.day = fromHash.day;
     } else if (tk) {
       state.day = tk;
-    } else if (hasNextWeek()) {
-      state.week = "next";
-      state.day = "月";
-      showNotice("今日は日曜日です。来週月曜日のメニューを表示しています。");
     } else {
+      // 日曜は来週分があれば来週月曜、なければ今週月曜から表示
+      if (hasNextWeek()) state.week = "next";
       state.day = "月";
-      showNotice("今日は日曜日です。今週月曜日のメニューを表示しています。");
     }
+    // 日曜の案内は、どの週・曜日を見ていても正しい文言にして、日曜のあいだは出したままにする
+    if (!tk) showNotice("日曜日は献立がありません。");
 
     renderFilter();
     selectDay(state.day, false);
