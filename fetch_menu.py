@@ -894,9 +894,10 @@ def main() -> None:
             json.dump({"payload": discord_payload, "files": [n for n, _ in files]}, f, ensure_ascii=False, indent=2)
     if args.no_discord:
         return
-    # 定期実行は保険として1日2回動く。本番へ通知済みなら2回目は送らない
-    if is_schedule and last_notified == today.isoformat():
-        print("[INFO] 今日はすでに通知済みのため送信しません（予備の定期実行）")
+    # Cloudflare Worker からの起動と GitHub の予備の定期実行が両方動いても、本番への通知は1日1回だけ
+    skip_if_notified = is_schedule or bool(os.environ.get("SKIP_IF_NOTIFIED"))
+    if skip_if_notified and last_notified == today.isoformat():
+        print("[INFO] 今日はすでに本番へ通知済みのため送信しません")
         return
     send_discord(discord_payload, files)
     if to_prod and DISCORD_WEBHOOK_URLS:
