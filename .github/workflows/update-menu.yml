@@ -1,9 +1,12 @@
 name: Update Cafeteria Menu
 
 on:
+  # 毎朝の実行は Cloudflare Worker が 8:30 に workflow_dispatch で起動する（時刻どおりに動くため）。
+  # GitHub の定期実行は遅れたり飛ばされたりするので、予備として残すだけ。
+  # Worker の分ですでに通知済みなら、予備の実行は何も送らずに終わる。
+  # JST 月〜土 08:50（UTC 日〜金 23:50）
   schedule:
-    # JST 月〜土 08:30（UTC 日〜金 23:30）
-    - cron: "30 23 * * 0-5"
+    - cron: "50 23 * * 0-5"
   workflow_dispatch:
     inputs:
       force_reparse:
@@ -14,6 +17,10 @@ on:
         description: "テスト用チャンネルにだけ通知する"
         type: boolean
         default: true
+      skip_if_notified:
+        description: "今日すでに本番へ通知済みなら送らない（Cloudflare Workerからの起動用）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -51,13 +58,16 @@ jobs:
 
       - name: Run fetch_menu.py
         env:
-          # 定期実行は本番へ。手動実行で「テスト用チャンネルにだけ」を選ぶとテスト用へ通知
-          DISCORD_WEBHOOK_URL: ${{ inputs.test_only && secrets.DISCORD_WEBHOOK_URL_TEST || secrets.DISCORD_WEBHOOK_URL }}
+          # 定期実行は本番へ。手動実行で「テスト用チャンネルにだけ」を選ぶとテスト用へ
+          # 手動実行やAPIからの起動では入力値が文字列 "true"/"false" で届くことがあるため、両方で判定する
+          DISCORD_WEBHOOK_URL: ${{ (inputs.test_only == true || inputs.test_only == 'true') && secrets.DISCORD_WEBHOOK_URL_TEST || secrets.DISCORD_WEBHOOK_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # 任意: 公開ページURL（通知にリンクが付く）、使うGeminiモデルの順番
           SITE_URL: ${{ vars.SITE_URL }}
           GEMINI_MODELS: ${{ vars.GEMINI_MODELS }}
-          FORCE_REPARSE: ${{ inputs.force_reparse && '1' || '' }}
+          FORCE_REPARSE: ${{ (inputs.force_reparse == true || inputs.force_reparse == 'true') && '1' || '' }}
+          NOTIFY_TARGET: ${{ (inputs.test_only == true || inputs.test_only == 'true') && 'test' || 'prod' }}
+          SKIP_IF_NOTIFIED: ${{ (inputs.skip_if_notified == true || inputs.skip_if_notified == 'true') && '1' || '' }}
         run: python fetch_menu.py
 
       - name: Commit and push updated data
