@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-11-27 15:04",
+  "updated_at": "2026-11-28 10:44",
   "source_url": "https://nitsc.co.jp/cafeteria/",
   "cafeterias": [
     {
@@ -9,7 +9,7 @@
       "short": "ダイニング",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria1",
       "image_url": "https://nitsc.co.jp/userdata/1menu.png",
-      "error": "処理失敗: cannot identify image file <_io.BytesIO object at 0x74f98a25bce0>",
+      "error": null,
       "closed_days": [],
       "week_status": "ok",
       "stale": false,
@@ -309,7 +309,7 @@
       "short": "トレビ",
       "source_url": "https://nitsc.co.jp/cafeteria/#cafeteria2",
       "image_url": "https://nitsc.co.jp/userdata/2menu.png",
-      "error": "処理失敗: cannot identify image file <_io.BytesIO object at 0x74f989ab9800>",
+      "error": null,
       "closed_days": [
         "土"
       ],
@@ -537,5 +537,5 @@
       }
     }
   ],
-  "last_notified": "2026-11-27"
+  "last_notified": "2026-11-28"
 }
